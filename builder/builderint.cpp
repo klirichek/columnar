@@ -273,33 +273,7 @@ void Packer_Int_T<T,HEADER>::WritePacked_Table()
 	for ( size_t i = 1; i < m_dUniques.size(); i++ )
 		m_tWriter.Pack_uint64 ( uint64_t ( m_dUniques[i] - m_dUniques[i-1] ) );
 
-	// write the ordinals
-	int iBits = CalcNumBits ( m_dUniques.size() );
-	m_dTablePacked.resize ( ( m_dTableIndexes.size()*iBits ) >> 5 );
-
-	int iId = 0;
-	for ( auto i : m_dCollected )
-	{
-		auto tFound = m_hUnique.find(i);
-		assert ( tFound!=m_hUnique.end() );
-		assert ( tFound->second<256 );
-
-		m_dTableIndexes[iId++] = tFound->second;
-		if ( iId==128 )
-		{
-			BitPack128 ( m_dTableIndexes, m_dTablePacked, iBits );
-			m_tWriter.Write ( (uint8_t*)m_dTablePacked.data(), m_dTablePacked.size()*sizeof(m_dTablePacked[0]) );
-			iId = 0;
-		}
-	}
-
-	if ( iId )
-	{
-		// zero out unused values
-		memset ( m_dTableIndexes.data()+iId, 0, (m_dTableIndexes.size()-iId)*sizeof(m_dTableIndexes[0]) );
-		BitPack128 ( m_dTableIndexes, m_dTablePacked, iBits );
-		m_tWriter.Write ( (uint8_t*)m_dTablePacked.data(), m_dTablePacked.size()*sizeof(m_dTablePacked[0]) );
-	}
+	WriteTableOrdinals ( m_dUniques, m_hUnique, m_dCollected, m_dTableIndexes, m_dTablePacked, m_tWriter );
 }
 
 //////////////////////////////////////////////////////////////////////////

@@ -24,9 +24,10 @@ namespace columnar
 
 enum class StrPacking_e : uint32_t
 {
-	CONSTLEN = 0,
-	DELTA,
-	DELTA_PFOR
+	CONST = 0,
+	CONSTLEN,
+	TABLE,
+	GENERIC
 };
 
 class Packer_i;
