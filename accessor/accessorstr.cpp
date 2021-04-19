@@ -22,165 +22,133 @@
 namespace columnar
 {
 
-class StoredSubblock_Str_c
+
+class StrHashReader_c
 {
 public:
-	void		ReadHeader ( FileReader_c & tReader, int iValues );
-	void		SetHashFlags ( bool bHaveHashes, bool bNeedHashes );
-
-	template <bool PACK>
-	inline int		ReadValue ( const uint8_t * & pValue, FileReader_c & tReader, int iIdInSubblock );
-	inline int		GetValueLength ( int iIdInSubblock ) const;
-	inline uint64_t	GetHash ( int iIdInSubblock ) const;
-
-protected:
-	SpanResizeable_T<uint64_t>	m_dCumulativeLengths;
-	std::vector<uint64_t>		m_dHashes;
-	std::vector<uint8_t>		m_dValue;
-	int64_t						m_tFirstValueOffset = 0;
-	int							m_iLastReadId = -1;
-	bool						m_bHaveHashes = false;
-	bool						m_bNeedHashes = false;
-
-	inline void	ReadHashes ( FileReader_c & tReader, int iValues );
-};
-
-
-void StoredSubblock_Str_c::ReadHashes ( FileReader_c & tReader, int iValues )
-{
-	if ( !m_bHaveHashes )
-		return;
-
-	int iTotalHashSize = iValues*sizeof(m_dHashes[0]);
-	if ( m_bNeedHashes )
-	{
-		m_dHashes.resize(iValues);
-		tReader.Read ( (uint8_t*)m_dHashes.data(), iTotalHashSize );
-	}
-	else
-		tReader.Seek ( tReader.GetPos() + iTotalHashSize );
-}
-
-
-void StoredSubblock_Str_c::SetHashFlags ( bool bHaveHashes, bool bNeedHashes )
-{
-	m_bHaveHashes = bHaveHashes;
-	m_bNeedHashes = bHaveHashes && bNeedHashes;
-}
-
-
-void StoredSubblock_Str_c::ReadHeader ( FileReader_c & tReader, int iValues )
-{
-	ReadHashes ( tReader, iValues );
-
-	m_dCumulativeLengths.resize(iValues);
-	m_dCumulativeLengths[0] = tReader.Unpack_uint64();
-	for ( int i = 1; i<iValues; i++ )
-		m_dCumulativeLengths[i] = tReader.Unpack_uint64() + m_dCumulativeLengths[i-1];
-
-	m_tFirstValueOffset = tReader.GetPos();
-
-	m_iLastReadId = -1;
-}
-
-
-int StoredSubblock_Str_c::GetValueLength ( int iIdInSubblock ) const
-{
-	uint64_t uLength = m_dCumulativeLengths[iIdInSubblock];
-	if ( iIdInSubblock>0 )
-		uLength -= m_dCumulativeLengths[iIdInSubblock-1];
-
-	return (int)uLength;
-}
-
-
-uint64_t StoredSubblock_Str_c::GetHash ( int iIdInSubblock ) const
-{
-	return m_dHashes[iIdInSubblock];
-}
-
-template <bool PACK>
-int StoredSubblock_Str_c::ReadValue ( const uint8_t * & pValue, FileReader_c & tReader, int iIdInSubblock )
-{
-	int iLength = GetValueLength(iIdInSubblock);
-
-	int64_t tOffset = m_tFirstValueOffset;
-	if ( iIdInSubblock>0 )
-		tOffset += m_dCumulativeLengths[iIdInSubblock-1];
-
-	if ( m_iLastReadId==-1 || m_iLastReadId+1!=iIdInSubblock )
-		tReader.Seek(tOffset);
-
-	m_iLastReadId = iIdInSubblock;
-
-	if ( PACK )
-	{
-		uint8_t * pData = nullptr;
-		std::tie ( pValue, pData ) = ByteCodec_c::PackData ( (size_t)iLength );
-		tReader.Read ( pData, iLength );
-	}
-	else
-	{
-		// try to read without copying first
-		if ( !tReader.ReadFromBuffer ( pValue, iLength ) )
-		{
-			// can't read directly from reader's buffer? read to a temp buffer then
-			m_dValue.resize(iLength);
-			tReader.Read ( m_dValue.data(), iLength );
-			pValue = m_dValue.data();
-		}
-	}
-
-	return iLength;
-}
-
-//////////////////////////////////////////////////////////////////////////
-
-class StoredSubblock_Str_PFOR_c : public StoredSubblock_Str_c
-{
-public:
-	void		ReadHeader ( FileReader_c & tReader, IntCodec_i & tCodec, int iValues );
+	FORCE_INLINE void		ReadHashesWithNullMap ( FileReader_c & tReader, int iValues, int iNumHashes );
+	FORCE_INLINE void		ReadHashes ( FileReader_c & tReader, int iValues, bool bNeedHashes );
+	FORCE_INLINE uint64_t	GetHash ( int iId ) const { return m_dHashes[iId]; }
 
 private:
+	SpanResizeable_T<uint32_t>	m_dNullMap;
+	SpanResizeable_T<uint64_t>	m_dHashes;
 	SpanResizeable_T<uint32_t>	m_dTmp;
 };
 
 
-void StoredSubblock_Str_PFOR_c::ReadHeader ( FileReader_c & tReader, IntCodec_i & tCodec, int iValues )
+void StrHashReader_c::ReadHashesWithNullMap ( FileReader_c & tReader, int iValues, int iNumHashes )
 {
-	ReadHashes ( tReader, iValues );
+	memset ( m_dHashes.data(), 0, m_dHashes.size()*sizeof(m_dHashes[0]) );
 
-	uint32_t uSubblockSize = (uint32_t)tReader.Unpack_uint64();
+	assert ( iValues==128 );
+	m_dTmp.resize ( iValues >> 5 );
+	m_dNullMap.resize(iValues);
+	tReader.Read ( (uint8_t*)m_dTmp.data(), m_dTmp.size()*sizeof(m_dTmp[0]) );
+	BitUnpack128 ( m_dTmp, m_dNullMap, 1 );
+	tReader.Read ( (uint8_t*)m_dHashes.data(), iNumHashes*sizeof(uint64_t) );
 
-	// the logic is that if we need hashes, we don't need string lengths/values
-	// maybe there's a case when we need both? we'll need separate flags in that case
-	if ( !m_bNeedHashes )
-		DecodeValues_Delta_PFOR ( m_dCumulativeLengths, tReader, tCodec, m_dTmp, uSubblockSize, false );
+	const uint32_t * pNullMap = m_dNullMap.end()-1;
+	uint64_t * pDstMin = m_dHashes.data();
+	uint64_t * pDst = pDstMin+iValues-1;
+	uint64_t * pSrc = pDstMin+iNumHashes-1;
+	while ( pDst>=pDstMin )
+	{
+		if ( *pNullMap )
+			*pDst-- = *pSrc;
 
-	m_tFirstValueOffset = tReader.GetPos();
-	m_iLastReadId = -1;
+		pNullMap--;
+		pSrc--;
+	}
+}
+
+
+void StrHashReader_c::ReadHashes ( FileReader_c & tReader, int iValues, bool bNeedHashes )
+{
+	int iNumHashes = tReader.Read_uint8();
+	bool bHaveNullMap = iValues!=iNumHashes;
+	size_t tTotalHashSize = iNumHashes*sizeof(uint64_t);
+
+	if ( !bNeedHashes )
+	{
+		size_t tOffsetToData = tTotalHashSize + ( bHaveNullMap ? ( iValues>>3 ) : 0 );
+		tReader.Seek ( tReader.GetPos() + tOffsetToData );
+		return;
+	}
+
+	m_dHashes.resize(iValues);
+	if ( bHaveNullMap )
+		ReadHashesWithNullMap ( tReader, iValues, iNumHashes );
+	else
+		tReader.Read ( (uint8_t*)m_dHashes.data(), tTotalHashSize );
 }
 
 //////////////////////////////////////////////////////////////////////////
 
-struct StoredBlock_StrConstLen_t
+class StoredBlock_StrConst_c : public StrHashReader_c
 {
+	using BASE = StrHashReader_c;
+
+public:
+	FORCE_INLINE void		ReadHeader ( FileReader_c & tReader, bool bHaveHashes, bool bNeedHashes );
+	template <bool PACK> FORCE_INLINE int GetValue ( const uint8_t * & pValue );
+	FORCE_INLINE int		GetValueLength() const { return (int)m_dValue.size(); }
+	FORCE_INLINE uint64_t	GetHash() const { return BASE::GetHash(0); }
+
+private:
+	std::vector<uint8_t>	m_dValue;
+	std::vector<uint8_t>	m_dValuePacked;
+};
+
+
+void StoredBlock_StrConst_c::ReadHeader ( FileReader_c & tReader, bool bHaveHashes, bool bNeedHashes )
+{
+	if ( bHaveHashes )
+		ReadHashes ( tReader, 1, bNeedHashes );
+
+	int iLength = tReader.Unpack_uint32();
+	m_dValue.resize(iLength);
+	tReader.Read ( m_dValue.data(), iLength );
+
+	ByteCodec_c::PackData ( m_dValuePacked, Span_T<uint8_t>(m_dValue) );
+}
+
+template <bool PACK>
+int StoredBlock_StrConst_c::GetValue ( const uint8_t * & pValue )
+{
+	if ( PACK )
+	{
+		uint8_t * pData = new uint8_t [ m_dValuePacked.size() ];
+		memcpy ( pData, m_dValuePacked.data(), m_dValuePacked.size() );
+		pValue = pData;
+	}
+	else
+		pValue = m_dValue.data();
+
+	return (int)m_dValue.size();
+
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+class StoredBlock_StrConstLen_c
+{
+public:
+	FORCE_INLINE void		ReadHeader ( FileReader_c & tReader, int iValues, bool bHaveStringHashes );
+	template <bool PACK> FORCE_INLINE int ReadValue ( const uint8_t * & pValue, FileReader_c & tReader, int iIdInBlock );
+	FORCE_INLINE int		GetValueLength() const { return (int)m_tValuesOffset; }
+	FORCE_INLINE uint64_t	GetHash ( FileReader_c & tReader, int iIdInBlock );
+
+private:
 	int64_t					m_tHashOffset = 0;
 	int64_t					m_tValuesOffset = 0;
 	size_t					m_tValueLength = 0;
 	int						m_iLastReadId = -1;
 	std::vector<uint8_t>	m_dValue;
-
-	inline void		ReadHeader ( FileReader_c & tReader, int iValues, bool bHaveStringHashes );
-
-	template <bool PACK>
-	inline int		ReadValue ( const uint8_t * & pValue, FileReader_c & tReader, int iIdInBlock );
-
-	inline uint64_t	GetHash ( FileReader_c & tReader, int iIdInBlock );
 };
 
 
-void StoredBlock_StrConstLen_t::ReadHeader ( FileReader_c & tReader, int iValues, bool bHaveStringHashes )
+void StoredBlock_StrConstLen_c::ReadHeader ( FileReader_c & tReader, int iValues, bool bHaveStringHashes )
 {
 	size_t tLength = tReader.Unpack_uint64();
 
@@ -199,7 +167,7 @@ void StoredBlock_StrConstLen_t::ReadHeader ( FileReader_c & tReader, int iValues
 }
 
 template <bool PACK>
-int StoredBlock_StrConstLen_t::ReadValue ( const uint8_t * & pValue, FileReader_c & tReader, int iIdInBlock )
+int StoredBlock_StrConstLen_c::ReadValue ( const uint8_t * & pValue, FileReader_c & tReader, int iIdInBlock )
 {
 	// non-sequental read or first read?
 	if ( m_iLastReadId==-1 || m_iLastReadId+1!=iIdInBlock )
@@ -232,7 +200,7 @@ int StoredBlock_StrConstLen_t::ReadValue ( const uint8_t * & pValue, FileReader_
 }
 
 
-uint64_t StoredBlock_StrConstLen_t::GetHash ( FileReader_c & tReader, int iIdInBlock )
+uint64_t StoredBlock_StrConstLen_c::GetHash ( FileReader_c & tReader, int iIdInBlock )
 {
 	// we assume that we are reading either hashes or values but not both at the same time
 	if ( m_iLastReadId==-1 || m_iLastReadId+1!=iIdInBlock )
@@ -248,75 +216,116 @@ uint64_t StoredBlock_StrConstLen_t::GetHash ( FileReader_c & tReader, int iIdInB
 
 //////////////////////////////////////////////////////////////////////////
 
-struct StoredBlock_Str_t
+class StoredBlock_StrTable_c : public StrHashReader_c
 {
-	int			m_iNumValues = 0;
+public:
+						StoredBlock_StrTable_c ( const std::string & sCodec32, const std::string & sCodec64, int iSubblockSize );
+
+	FORCE_INLINE void	ReadHeader ( FileReader_c & tReader, int iValues, bool bHaveHashes, bool bNeedHashes );
+	FORCE_INLINE void	ReadSubblock ( int iSubblockId, int iNumValues, FileReader_c & tReader );
+	FORCE_INLINE int	GetValueLength ( int iIdInSubblock ) const				{ return m_dTableValueLengths[m_dValueIndexes[iIdInSubblock]]; }
+	template <bool PACK>
+	FORCE_INLINE int GetValue ( const uint8_t * & pValue, int iIdInSubblock )	{ return PackValue<uint8_t,PACK> ( m_dTableValues [ m_dValueIndexes[iIdInSubblock] ], pValue ); } 
+
+private:
+	std::vector<std::vector<uint8_t>>	m_dTableValues;
+	SpanResizeable_T<uint32_t>			m_dTableValueLengths;
+	SpanResizeable_T<uint32_t> 			m_dTmp;
+	std::vector<uint32_t>				m_dValueIndexes;
+	std::vector<uint32_t>				m_dEncoded;
+	std::unique_ptr<IntCodec_i>			m_pCodec;
+
+	int64_t		m_iValuesOffset = 0;
 	int			m_iSubblockId = -1;
-	int64_t		m_tValuesOffset = 0;
-
-	SpanResizeable_T<uint64_t> m_dOffsets;
-
-	void			Setup ( int iBlockValues, int64_t tValuesOffset );
-	uint32_t		GetNumSubblockValues ( int iSubblockId, int iSubblockSize ) const;
+	int			m_iBits = 0;
 };
 
 
-void StoredBlock_Str_t::Setup ( int iBlockValues, int64_t tValuesOffset )
+StoredBlock_StrTable_c::StoredBlock_StrTable_c ( const std::string & sCodec32, const std::string & sCodec64, int iSubblockSize )
+	: m_pCodec ( CreateIntCodec ( sCodec32, sCodec64 ) ) 
 {
-	m_iNumValues = iBlockValues;
-	m_tValuesOffset = tValuesOffset;
+	m_dValueIndexes.resize(iSubblockSize);
+}
+
+
+void StoredBlock_StrTable_c::ReadHeader ( FileReader_c & tReader, int iValues, bool bHaveHashes, bool bNeedHashes )
+{
+	m_dTableValues.resize ( tReader.Read_uint8() );
+
+	if ( bHaveHashes )
+		ReadHashes ( tReader, iValues, bNeedHashes ); // read or skip hashes depending on bNeedHashes
+
+	uint32_t uTotalSize = tReader.Unpack_uint32();
+	DecodeValues_Delta_PFOR ( m_dTableValueLengths, tReader, *m_pCodec, m_dTmp, uTotalSize, false );
+
+	for ( size_t i = 0; i < m_dTableValues.size(); i++ )
+	{
+		auto & tValue = m_dTableValues[i];
+		tValue.resize ( m_dTableValueLengths[i] );
+		tReader.Read ( tValue.data(), tValue.size() );
+	}
+
+	m_iBits = CalcNumBits ( m_dTableValues.size() );
+	m_dEncoded.resize ( ( m_dValueIndexes.size() >> 5 ) * m_iBits );
+
+	m_iValuesOffset = tReader.GetPos();
 	m_iSubblockId = -1;
 }
 
 
-uint32_t StoredBlock_Str_t::GetNumSubblockValues ( int iSubblockId, int iSubblockSize ) const
+void StoredBlock_StrTable_c::ReadSubblock ( int iSubblockId, int iNumValues, FileReader_c & tReader )
 {
-	if ( m_iNumValues==DOCS_PER_BLOCK )
-		return iSubblockSize;
+	if ( m_iSubblockId==iSubblockId )
+		return;
 
-	if ( iSubblockId<m_dOffsets.size()-1 )
-		return iSubblockSize;
+	m_iSubblockId = iSubblockId;
 
-	int iLeftover = m_iNumValues & (iSubblockSize-1);
-	return iLeftover ? iLeftover : iSubblockSize;
+	size_t uPackedSize = m_dEncoded.size()*sizeof ( m_dEncoded[0] );
+	tReader.Seek ( m_iValuesOffset + uPackedSize*iSubblockId );
+	tReader.Read ( (uint8_t*)m_dEncoded.data(), uPackedSize );
+	BitUnpack128 ( m_dEncoded, m_dValueIndexes, m_iBits );
 }
 
 //////////////////////////////////////////////////////////////////////////
 
-class StoredBlock_StrDeltaPFOR_c : public StoredBlock_Str_t
+class StoredBlock_StrGeneric_c : public StrHashReader_c
 {
 public:
-	StoredSubblock_Str_PFOR_c	m_tSubblock;
+						StoredBlock_StrGeneric_c ( const std::string & sCodec32, const std::string & sCodec64 ) : m_pCodec ( CreateIntCodec ( sCodec32, sCodec64 ) ) {}
 
-								StoredBlock_StrDeltaPFOR_c ( const std::string & sCodec32, const std::string & sCodec64 );
-
-	inline void					ReadHeader ( FileReader_c & tReader, int iBlockValues, bool bHaveHashes, bool bNeedHashes );
-	inline void					ReadSubblock ( int iSubblockId, FileReader_c & tReader, int iSubblocksize );
+	FORCE_INLINE void	ReadHeader ( FileReader_c & tReader, bool bHaveHashes, bool bNeedHashes );
+	FORCE_INLINE void	ReadSubblock ( int iSubblockId, int iSubblockValues, FileReader_c & tReader );
+	template <bool PACK> FORCE_INLINE int ReadValue ( const uint8_t * & pValue, int iIdInSubblock, FileReader_c & tReader );
+	FORCE_INLINE int	GetValueLength ( int iIdInSubblock ) const;
 
 private:
 	std::unique_ptr<IntCodec_i>	m_pCodec;
 	SpanResizeable_T<uint32_t>	m_dTmp;
+	SpanResizeable_T<uint64_t>	m_dOffsets;
+	SpanResizeable_T<uint64_t>	m_dCumulativeLengths;
+	SpanResizeable_T<uint8_t>	m_dValue;
+
+	int		m_iSubblockId = -1;
+	int64_t	m_tValuesOffset = 0;
+	bool	m_bHaveHashes = false;
+	bool	m_bNeedHashes = false;
+	int64_t	m_iFirstValueOffset = 0;
+	int		m_iLastReadId = -1;
 };
 
 
-StoredBlock_StrDeltaPFOR_c::StoredBlock_StrDeltaPFOR_c ( const std::string & sCodec32, const std::string & sCodec64 )
-	: m_pCodec ( CreateIntCodec ( sCodec32, sCodec64 ) )
-{}
-
-
-void StoredBlock_StrDeltaPFOR_c::ReadHeader ( FileReader_c & tReader, int iBlockValues, bool bHaveHashes, bool bNeedHashes )
+void StoredBlock_StrGeneric_c::ReadHeader ( FileReader_c & tReader, bool bHaveHashes, bool bNeedHashes )
 {
 	uint32_t uSubblockSize = tReader.Unpack_uint32();
 	DecodeValues_Delta_PFOR ( m_dOffsets, tReader, *m_pCodec, m_dTmp, uSubblockSize, false );
 
-	int64_t tValuesOffset = tReader.GetPos();
-	Setup ( iBlockValues, tValuesOffset );
-
-	m_tSubblock.SetHashFlags ( bHaveHashes, bNeedHashes );
+	m_tValuesOffset = tReader.GetPos();
+	m_bHaveHashes = bHaveHashes;
+	m_bNeedHashes = bHaveHashes && bNeedHashes;
 }
 
 
-void StoredBlock_StrDeltaPFOR_c::ReadSubblock ( int iSubblockId, FileReader_c & tReader, int iSubblocksize )
+void StoredBlock_StrGeneric_c::ReadSubblock ( int iSubblockId, int iSubblockValues, FileReader_c & tReader )
 {
 	if ( m_iSubblockId==iSubblockId )
 		return;
@@ -324,7 +333,63 @@ void StoredBlock_StrDeltaPFOR_c::ReadSubblock ( int iSubblockId, FileReader_c & 
 	m_iSubblockId = iSubblockId;
 	tReader.Seek ( m_tValuesOffset+m_dOffsets[iSubblockId] );
 
-	m_tSubblock.ReadHeader ( tReader, *m_pCodec, GetNumSubblockValues ( m_iSubblockId, iSubblocksize ) );
+	if ( m_bHaveHashes )
+		ReadHashes ( tReader, iSubblockValues, m_bNeedHashes ); // read or skip hashes depending on m_bNeedHashes
+
+	uint32_t uSubblockSize = (uint32_t)tReader.Unpack_uint64();
+
+	// the logic is that if we need hashes, we don't need string lengths/values
+	// maybe there's a case when we need both? we'll need separate flags in that case
+	if ( !m_bNeedHashes )
+		DecodeValues_Delta_PFOR ( m_dCumulativeLengths, tReader, *m_pCodec, m_dTmp, uSubblockSize, false );
+
+	m_iFirstValueOffset = tReader.GetPos();
+	m_iLastReadId = -1;
+}
+
+
+int StoredBlock_StrGeneric_c::GetValueLength ( int iIdInSubblock ) const
+{
+	uint64_t uLength = m_dCumulativeLengths[iIdInSubblock];
+	if ( iIdInSubblock>0 )
+		uLength -= m_dCumulativeLengths[iIdInSubblock-1];
+
+	return (int)uLength;
+}
+
+template <bool PACK>
+int StoredBlock_StrGeneric_c::ReadValue ( const uint8_t * & pValue, int iIdInSubblock, FileReader_c & tReader )
+{
+	int iLength = GetValueLength(iIdInSubblock);
+
+	int64_t iOffset = m_iFirstValueOffset;
+	if ( iIdInSubblock>0 )
+		iOffset += m_dCumulativeLengths[iIdInSubblock-1];
+
+	if ( m_iLastReadId==-1 || m_iLastReadId+1!=iIdInSubblock )
+		tReader.Seek(iOffset);
+
+	m_iLastReadId = iIdInSubblock;
+
+	if ( PACK )
+	{
+		uint8_t * pData = nullptr;
+		std::tie ( pValue, pData ) = ByteCodec_c::PackData ( (size_t)iLength );
+		tReader.Read ( pData, iLength );
+	}
+	else
+	{
+		// try to read without copying first
+		if ( !tReader.ReadFromBuffer ( pValue, iLength ) )
+		{
+			// can't read directly from reader's buffer? read to a temp buffer then
+			m_dValue.resize(iLength);
+			tReader.Read ( m_dValue.data(), iLength );
+			pValue = m_dValue.data();
+		}
+	}
+
+	return iLength;
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -334,58 +399,61 @@ class Iterator_String_c : public Iterator_i, public StoredBlockTraits_t
 public:
 				Iterator_String_c ( const AttributeHeader_i & tHeader, FileReader_c * pReader, const IteratorHints_t & tHints );
 
-	uint32_t		AdvanceTo ( uint32_t tRowID ) final;
+	uint32_t	AdvanceTo ( uint32_t tRowID ) final;
 
-	int64_t	Get() final;
+	int64_t		Get() final;
 
 	int			Get ( const uint8_t * & pData, bool bPack ) final;
 	int			GetLength() const final;
 
 	uint64_t	GetStringHash() final;
-	bool		HaveStringHashes() const final;
+	bool		HaveStringHashes() const final { return m_tHeader.HaveStringHashes(); }
 
 private:
-	SubblockCalc_t					m_tSubblockCalc;
 	const AttributeHeader_i &		m_tHeader;
 	IteratorHints_t					m_tHints;
 	std::unique_ptr<FileReader_c>	m_pReader;
 	StrPacking_e					m_ePacking = StrPacking_e::CONSTLEN;
-	StoredBlock_StrConstLen_t		m_tBlockConstLen;
-	StoredBlock_StrDeltaPFOR_c		m_tBlockDeltaPFOR;
+	StoredBlock_StrConst_c			m_tBlockConst;
+	StoredBlock_StrConstLen_c		m_tBlockConstLen;
+	StoredBlock_StrTable_c			m_tBlockTable;
+	StoredBlock_StrGeneric_c		m_tBlockGeneric;
 
 	const uint8_t *			m_pResult = nullptr;
 	size_t					m_tValueLength = 0;
 
 	void (Iterator_String_c::*m_fnReadValue)() = nullptr;
 	void (Iterator_String_c::*m_fnReadValuePacked)() = nullptr;
-	void (Iterator_String_c::*m_fnReadSubblockHeader)() = nullptr;
 	int (Iterator_String_c::*m_fnGetValueLength)() const = nullptr;
 	uint64_t (Iterator_String_c::*m_fnGetHash)() = nullptr;
 
 	inline void	SetCurBlock ( uint32_t uBlockId );
 
-	void		ReadHeader_ConstLen() {}		// no subblock header for constlen
-	template <bool PACK>
-	void		ReadValue_ConstLen();
-	int			GetValueLen_ConstLen() const;
-	uint64_t	GetHash_ConstLen();
+	template <bool PACK> void ReadValue_Const()		{ m_tValueLength = m_tBlockConst.GetValue<PACK>(m_pResult); }
+	int			GetValueLen_Const() const			{ return m_tBlockConst.GetValueLength(); }
+	uint64_t	GetHash_Const()						{ return m_tBlockConst.GetHash(); }
 
-	void		ReadHeader_DeltaPFOR();
-	template <bool PACK>
-	void		ReadValue_DeltaPFOR();
-	int			GetValueLen_DeltaPFOR() const;
+	template <bool PACK> void ReadValue_ConstLen()	{ m_tValueLength = m_tBlockConstLen.ReadValue<PACK> ( m_pResult, *m_pReader, m_tRequestedRowID-m_tStartBlockRowId ); }
+	int			GetValueLen_ConstLen() const		{ return m_tBlockConstLen.GetValueLength(); }
+	uint64_t	GetHash_ConstLen()					{ return m_tBlockConstLen.GetHash ( *m_pReader, m_tRequestedRowID-m_tStartBlockRowId ); }
 
-	uint64_t	GetHash_DeltaPFOR();
+	template <bool PACK> void ReadValue_Table();
+	int			GetValueLen_Table() const			{ return m_tBlockTable.GetValueLength(m_iValueIdInSubblock); }
+	uint64_t	GetHash_Table()						{ return m_tBlockTable.GetHash(m_iValueIdInSubblock); }
+
+	template <bool PACK> void ReadValue_Generic();
+	int			GetValueLen_Generic() const			{ return m_tBlockGeneric.GetValueLength(m_iValueIdInSubblock); }
+	uint64_t	GetHash_Generic()					{ return m_tBlockGeneric.GetHash(m_iValueIdInSubblock); }
 };
 
 
 Iterator_String_c::Iterator_String_c ( const AttributeHeader_i & tHeader, FileReader_c * pReader, const IteratorHints_t & tHints )
 	: StoredBlockTraits_t ( tHeader.GetSettings().m_iSubblockSize )
-	, m_tSubblockCalc ( tHeader.GetSettings().m_iSubblockSize )
 	, m_tHeader ( tHeader )
 	, m_tHints ( tHints )
 	, m_pReader ( pReader )
-	, m_tBlockDeltaPFOR ( tHeader.GetSettings().m_sCompressionUINT32, tHeader.GetSettings().m_sCompressionUINT64 )
+	, m_tBlockTable ( tHeader.GetSettings().m_sCompressionUINT32, tHeader.GetSettings().m_sCompressionUINT64, tHeader.GetSettings().m_iSubblockSize )
+	, m_tBlockGeneric ( tHeader.GetSettings().m_sCompressionUINT32, tHeader.GetSettings().m_sCompressionUINT64 )
 {
 	assert(pReader);
 }
@@ -398,22 +466,36 @@ void Iterator_String_c::SetCurBlock ( uint32_t uBlockId )
 
 	switch ( m_ePacking )
 	{
+	case StrPacking_e::CONST:
+		m_fnReadValue			= &Iterator_String_c::ReadValue_Const<false>;
+		m_fnReadValuePacked		= &Iterator_String_c::ReadValue_Const<true>;
+		m_fnGetValueLength		= &Iterator_String_c::GetValueLen_Const;
+		m_fnGetHash				= &Iterator_String_c::GetHash_Const;
+		m_tBlockConst.ReadHeader ( *m_pReader, m_tHeader.HaveStringHashes(), m_tHints.m_bNeedStringHashes );
+		break;
+
 	case StrPacking_e::CONSTLEN:
 		m_fnReadValue			= &Iterator_String_c::ReadValue_ConstLen<false>;
 		m_fnReadValuePacked		= &Iterator_String_c::ReadValue_ConstLen<true>;
-		m_fnReadSubblockHeader	= &Iterator_String_c::ReadHeader_ConstLen;
 		m_fnGetValueLength		= &Iterator_String_c::GetValueLen_ConstLen;
 		m_fnGetHash				= &Iterator_String_c::GetHash_ConstLen;
 		m_tBlockConstLen.ReadHeader ( *m_pReader, m_tHeader.GetNumDocs(uBlockId), m_tHeader.HaveStringHashes() );
 		break;
 
-	case StrPacking_e::DELTA_PFOR:
-		m_fnReadValue			= &Iterator_String_c::ReadValue_DeltaPFOR<false>;
-		m_fnReadValuePacked		= &Iterator_String_c::ReadValue_DeltaPFOR<true>;
-		m_fnReadSubblockHeader	= &Iterator_String_c::ReadHeader_DeltaPFOR;
-		m_fnGetValueLength		= &Iterator_String_c::GetValueLen_DeltaPFOR;
-		m_fnGetHash				= &Iterator_String_c::GetHash_DeltaPFOR;
-		m_tBlockDeltaPFOR.ReadHeader ( *m_pReader, m_tHeader.GetNumDocs(uBlockId), m_tHeader.HaveStringHashes(), m_tHints.m_bNeedStringHashes );
+	case StrPacking_e::TABLE:
+		m_fnReadValue			= &Iterator_String_c::ReadValue_Table<false>;
+		m_fnReadValuePacked		= &Iterator_String_c::ReadValue_Table<true>;
+		m_fnGetValueLength		= &Iterator_String_c::GetValueLen_Table;
+		m_fnGetHash				= &Iterator_String_c::GetHash_Table;
+		m_tBlockTable.ReadHeader ( *m_pReader, m_tHeader.GetNumDocs(uBlockId), m_tHeader.HaveStringHashes(), m_tHints.m_bNeedStringHashes );
+		break;
+
+	case StrPacking_e::GENERIC:
+		m_fnReadValue			= &Iterator_String_c::ReadValue_Generic<false>;
+		m_fnReadValuePacked		= &Iterator_String_c::ReadValue_Generic<true>;
+		m_fnGetValueLength		= &Iterator_String_c::GetValueLen_Generic;
+		m_fnGetHash				= &Iterator_String_c::GetHash_Generic;
+		m_tBlockGeneric.ReadHeader ( *m_pReader, m_tHeader.HaveStringHashes(), m_tHints.m_bNeedStringHashes );
 		break;
 
 	default:
@@ -428,51 +510,25 @@ void Iterator_String_c::SetCurBlock ( uint32_t uBlockId )
 }
 
 template <bool PACK>
-void Iterator_String_c::ReadValue_ConstLen()
+void Iterator_String_c::ReadValue_Table()
 {
-	m_tValueLength = m_tBlockConstLen.ReadValue<PACK> ( m_pResult, *m_pReader, m_iIdInBlock );
-}
-
-
-int Iterator_String_c::GetValueLen_ConstLen() const
-{
-	return (int)m_tBlockConstLen.m_tValueLength;
-}
-
-
-uint64_t Iterator_String_c::GetHash_ConstLen()
-{
-	return m_tBlockConstLen.GetHash ( *m_pReader, m_iIdInBlock );
-}
-
-
-void Iterator_String_c::ReadHeader_DeltaPFOR()
-{
-	m_iSubblockId = m_tSubblockCalc.GetSubblockId(m_iIdInBlock);
-	m_iValueIdInSubblock = m_tSubblockCalc.GetValueIdInSubblock(m_iIdInBlock);
-	m_tBlockDeltaPFOR.ReadSubblock ( m_iSubblockId, *m_pReader, m_iSubblockSize );
+	uint32_t uIdInBlock = m_tRequestedRowID - m_tStartBlockRowId;
+	int iSubblockId = StoredBlockTraits_t::GetSubblockId(uIdInBlock);
+	m_tBlockTable.ReadSubblock ( iSubblockId, StoredBlockTraits_t::GetNumSubblockValues(iSubblockId), *m_pReader );
+	m_tValueLength = m_tBlockTable.template GetValue<PACK>( m_pResult, GetValueIdInSubblock(uIdInBlock) );
 }
 
 template <bool PACK>
-void Iterator_String_c::ReadValue_DeltaPFOR()
+void Iterator_String_c::ReadValue_Generic()
 {
-	m_tValueLength = m_tBlockDeltaPFOR.m_tSubblock.ReadValue<PACK> ( m_pResult, *m_pReader, m_iValueIdInSubblock );
+	uint32_t uIdInBlock = m_tRequestedRowID - m_tStartBlockRowId;
+	int iSubblockId = StoredBlockTraits_t::GetSubblockId(uIdInBlock);
+	m_tBlockGeneric.ReadSubblock ( iSubblockId, StoredBlockTraits_t::GetNumSubblockValues(iSubblockId), *m_pReader );
+	m_tValueLength = m_tBlockGeneric.template ReadValue<PACK>( m_pResult, GetValueIdInSubblock(uIdInBlock), *m_pReader );
 }
 
 
-int Iterator_String_c::GetValueLen_DeltaPFOR() const
-{
-	return m_tBlockDeltaPFOR.m_tSubblock.GetValueLength(m_iValueIdInSubblock);
-}
-
-
-uint64_t Iterator_String_c::GetHash_DeltaPFOR()
-{
-	return m_tBlockDeltaPFOR.m_tSubblock.GetHash(m_iValueIdInSubblock);
-}
-
-
-uint32_t	Iterator_String_c::AdvanceTo ( uint32_t tRowID )
+uint32_t Iterator_String_c::AdvanceTo ( uint32_t tRowID )
 {
 	if ( m_tRequestedRowID==tRowID ) // might happen on GetLength/Get calls
 		return tRowID;
@@ -482,10 +538,6 @@ uint32_t	Iterator_String_c::AdvanceTo ( uint32_t tRowID )
 		SetCurBlock(uBlockId);
 
 	m_tRequestedRowID = tRowID;
-	m_iIdInBlock = m_tRequestedRowID-m_tStartBlockRowId;
-
-	assert(m_fnReadSubblockHeader);
-	(*this.*m_fnReadSubblockHeader)();
 
 	return tRowID;
 }
@@ -529,12 +581,6 @@ uint64_t Iterator_String_c::GetStringHash()
 {
 	assert(m_fnGetHash);
 	return (*this.*m_fnGetHash)();
-}
-
-
-bool Iterator_String_c::HaveStringHashes() const
-{
-	return m_tHeader.HaveStringHashes();
 }
 
 //////////////////////////////////////////////////////////////////////////

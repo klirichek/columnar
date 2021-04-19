@@ -136,6 +136,14 @@ public:
 		return { pResult, pResult+iPackedLen };
 	}
 
+	static inline void PackData ( std::vector<uint8_t> & dPacked, const Span_T<uint8_t> & dData )
+	{
+		dPacked.resize ( dData.size() + CalcPackedLen (dData.size() ) );
+		uint8_t * p = dPacked.data();
+		Pack_uint64 ( p, dData.size() );
+		memcpy ( p, dData.begin(), dData.size() );
+	}
+
 	template <typename T>
 	static inline int CalcPackedLen ( T tValue )
 	{

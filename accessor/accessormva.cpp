@@ -158,17 +158,6 @@ static FORCE_INLINE void ApplyInverseDeltas ( Span_T<T> & dValues, std::vector<S
 	}
 }
 
-template <typename T, bool PACK>
-static FORCE_INLINE uint32_t PackMVA ( const Span_T<T> & dValue, const uint8_t * & pValue )
-{
-	if ( PACK )
-		pValue = ByteCodec_c::PackData(dValue);
-	else
-		pValue = (const uint8_t*)dValue.data();
-
-	return uint32_t ( dValue.size()*sizeof(T) );
-}
-
 template <typename T>
 static FORCE_INLINE void PrecalcSizeOffset ( const Span_T<uint32_t> & dLengths, Span_T<T> & dValues, std::vector<Span_T<T>> & dValuePtrs )
 {
@@ -225,7 +214,7 @@ template <typename T>
 template <bool PACK>
 uint32_t StoredBlock_MvaConst_T<T>::GetValue ( const uint8_t * & pValue ) const
 {
-	return PackMVA<T,PACK> ( m_dValueSpan, pValue );
+	return PackValue<T,PACK> ( m_dValueSpan, pValue );
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -316,7 +305,7 @@ template <typename T>
 template <bool PACK>
 uint32_t StoredBlock_MvaConstLen_T<T>::GetValue ( const uint8_t * & pValue, int iIdInSubblock ) const
 {
-	return PackMVA<T,PACK> ( m_dValuePtrs[iIdInSubblock], pValue );
+	return PackValue<T,PACK> ( m_dValuePtrs[iIdInSubblock], pValue );
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -331,7 +320,7 @@ public:
 	FORCE_INLINE void			ReadSubblock ( int iSubblockId, int iNumValues, FileReader_c & tReader );
 
 	template <bool PACK>
-	FORCE_INLINE uint32_t		GetValue ( int iIdInSubblock, FileReader_c & tReader, const uint8_t * & pValue );
+	FORCE_INLINE uint32_t		GetValue ( const uint8_t * & pValue, int iIdInSubblock );
 	FORCE_INLINE const Span_T<uint32_t> & GetValueIndexes() const { return m_tValuesRead; }
 
 	template <typename T_COMP>
@@ -404,9 +393,9 @@ void StoredBlock_MvaTable_T<T>::ReadSubblock ( int iSubblockId, int iNumValues, 
 
 template <typename T>
 template <bool PACK>
-uint32_t StoredBlock_MvaTable_T<T>::GetValue ( int iIdInSubblock, FileReader_c & tReader, const uint8_t * & pValue )
+uint32_t StoredBlock_MvaTable_T<T>::GetValue ( const uint8_t * & pValue, int iIdInSubblock )
 {
-	return PackMVA<T,PACK> ( m_dValuePtrs [ m_dValueIndexes[iIdInSubblock] ], pValue );
+	return PackValue<T,PACK> ( m_dValuePtrs [ m_dValueIndexes[iIdInSubblock] ], pValue );
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -421,7 +410,7 @@ public:
 	FORCE_INLINE void		ReadSubblock ( int iSubblockId, FileReader_c & tReader );
 
 	template <bool PACK>
-	FORCE_INLINE uint32_t		GetValue ( const uint8_t * & pValue, int iIdInSubblock ) const;
+	FORCE_INLINE uint32_t	GetValue ( const uint8_t * & pValue, int iIdInSubblock ) const;
 	FORCE_INLINE const std::vector<Span_T<T>> & GetAllValues() const { return m_dValuePtrs; }
 
 private:
@@ -490,7 +479,7 @@ template <typename T>
 template <bool PACK>
 FORCE_INLINE uint32_t StoredBlock_MvaPFOR_T<T>::GetValue ( const uint8_t * & pValue, int iIdInSubblock ) const
 {
-	return PackMVA<T,PACK> ( m_dValuePtrs[iIdInSubblock], pValue );
+	return PackValue<T,PACK> ( m_dValuePtrs[iIdInSubblock], pValue );
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -610,7 +599,7 @@ void Accessor_MVA_T<T>::ReadValue_Table()
 	uint32_t uIdInBlock = m_tRequestedRowID - m_tStartBlockRowId;
 	int iSubblockId = StoredBlockTraits_t::GetSubblockId(uIdInBlock);
 	m_tBlockTable.ReadSubblock ( iSubblockId, StoredBlockTraits_t::GetNumSubblockValues(iSubblockId), *m_pReader );
-	m_tValueLength = m_tBlockTable.template GetValue<PACK>( GetValueIdInSubblock(uIdInBlock), *m_pReader, m_pResult );
+	m_tValueLength = m_tBlockTable.template GetValue<PACK>( m_pResult, GetValueIdInSubblock(uIdInBlock) );
 }
 
 template <typename T>

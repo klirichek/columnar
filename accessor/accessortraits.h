@@ -87,7 +87,6 @@ struct StoredBlockTraits_t : SubblockCalc_t
 	using SubblockCalc_t::SubblockCalc_t;
 
 	uint32_t		m_tRequestedRowID = INVALID_ROW_ID;
-	int				m_iIdInBlock = 0;
 	int				m_iSubblockId = 0;
 	int				m_iValueIdInSubblock = 0;
 	uint32_t		m_uBlockId = INVALID_BLOCK_ID;
@@ -308,6 +307,17 @@ FORCE_INLINE void DecodeValues_PFOR ( SpanResizeable_T<T> & dValues, FileReader_
 	tCodec.Decode ( dTmp, dValues );
 
 	AddMinValue ( dValues, uMin );
+}
+
+template <typename T, bool PACK>
+FORCE_INLINE uint32_t PackValue ( const Span_T<T> & dValue, const uint8_t * & pValue )
+{
+	if ( PACK )
+		pValue = ByteCodec_c::PackData(dValue);
+	else
+		pValue = (const uint8_t*)dValue.data();
+
+	return uint32_t ( dValue.size()*sizeof(T) );
 }
 
 } // namespace columnar

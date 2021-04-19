@@ -218,7 +218,7 @@ template<typename T>
 class Accessor_INT_T : public StoredBlockTraits_t
 {
 public:
-						Accessor_INT_T ( const AttributeHeader_i & tHeader, FileReader_c * pReader );
+					Accessor_INT_T ( const AttributeHeader_i & tHeader, FileReader_c * pReader );
 
 protected:
 	const AttributeHeader_i &		m_tHeader;
@@ -230,9 +230,9 @@ protected:
 
 	int64_t (Accessor_INT_T<T>::*m_fnReadValue)() = nullptr;
 
-	IntPacking_e		m_ePacking = IntPacking_e::CONST;
+	IntPacking_e	m_ePacking = IntPacking_e::CONST;
 
-	inline void			SetCurBlock ( uint32_t uBlockId );
+	FORCE_INLINE void SetCurBlock ( uint32_t uBlockId );
 
 	int64_t			ReadValue_Const();
 	int64_t			ReadValue_Table();

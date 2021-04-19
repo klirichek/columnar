@@ -100,8 +100,8 @@ protected:
 
 	void					WriteOffsets();
 
-	template <typename WRITER> bool WriteNullMap ( const Span_T<std::string> & dStrings, WRITER & tWriter );
-	template <typename WRITER> void	WriteHashes ( const Span_T<std::string> & dStrings, WRITER & tWriter );
+	template <typename WRITER> bool WriteNullMap ( const Span_T<std::string> & dStrings, WRITER & tWriter, bool bNoNullMap );
+	template <typename WRITER> void	WriteHashes ( const Span_T<std::string> & dStrings, WRITER & tWriter, bool bNoNullMap );
 };
 
 
@@ -223,10 +223,9 @@ void Packer_String_c::WriteToFile ( StrPacking_e ePacking )
 void Packer_String_c::WritePacked_Const()
 {
 	assert ( m_iUniques==1 );
+
+	WriteHashes ( Span_T<std::string>(m_dCollected.data(), 1), m_tWriter, true );
 	m_tWriter.Pack_uint32(m_iConstLength);
-
-	WriteHashes ( Span_T<std::string>(m_dCollected.data(), 1), m_tWriter );
-
 	m_tWriter.Write ( (const uint8_t*)m_dCollected[0].c_str(), m_dCollected[0].length() );
 }
 
@@ -239,7 +238,7 @@ void Packer_String_c::WritePacked_Table()
 	for ( const auto & i : m_hUnique )
 		m_dUniques.push_back ( i.first );
 
-	std::sort ( m_dUniques.begin(), m_dUniques.end() );
+	std::sort ( m_dUniques.begin(), m_dUniques.end(), []( const auto & a, const auto & b ) { return a.length()<b.length(); } );
 
 	for ( size_t i = 0; i < m_dUniques.size(); i++ )
 	{
@@ -254,7 +253,8 @@ void Packer_String_c::WritePacked_Table()
 
 	// write the table
 	m_tWriter.Write_uint8 ( (uint8_t)m_dUniques.size() );
-	WriteValues_PFOR ( Span_T<uint32_t>(m_dTableLengths), m_dUncompressed32, m_dCompressed, BASE::m_tWriter, m_pCodec.get(), true );
+	WriteHashes ( Span_T<std::string>(m_dUniques), m_tWriter, true );
+	WriteValues_Delta_PFOR ( Span_T<uint32_t>(m_dTableLengths), m_dUncompressed32, m_dCompressed, BASE::m_tWriter, m_pCodec.get() );
 
 	for ( const auto & i : m_dUniques )
 		m_tWriter.Write ( (const uint8_t*)i.c_str(), i.length() );
@@ -268,25 +268,30 @@ void Packer_String_c::WritePacked_ConstLen()
 	assert ( m_iConstLength>=0 );
 	m_tWriter.Pack_uint32 ( m_iConstLength );
 
-	WriteHashes ( Span_T<std::string>(m_dCollected), m_tWriter );
+	WriteHashes ( Span_T<std::string>(m_dCollected), m_tWriter, true );
 
 	for ( const auto & i : m_dCollected )
 		m_tWriter.Write ( (const uint8_t*)i.c_str(), i.length() );
 }
 
 template <typename WRITER>
-bool Packer_String_c::WriteNullMap ( const Span_T<std::string> & dStrings, WRITER & tWriter )
+bool Packer_String_c::WriteNullMap ( const Span_T<std::string> & dStrings, WRITER & tWriter, bool bNoNullMap )
 {
-	int iNumEmpty = 0;
+	int iNumNonEmpty = 0;
 	for ( const auto & i : dStrings )
-		if ( i.empty() )
-			iNumEmpty++;
+		if ( !i.empty() )
+			iNumNonEmpty++;
 
 	size_t tNumValues = dStrings.size();
 
-	// is the total size of 8-byte hashes of empty strings greater that map size (by, say, 2x)?
-	bool bNeedNullMap = iNumEmpty*sizeof(uint64_t) > 2*(tNumValues/8);
-	tWriter.Write_uint8 ( bNeedNullMap ? 1 : 0 );
+	// is the total size of 8-byte hashes of empty strings greater that map size (by, say, 4x)?
+	const int COEFF = 4;
+	bool bNeedNullMap = (tNumValues-iNumNonEmpty)*sizeof(uint64_t) > COEFF*(tNumValues/8);
+	bNeedNullMap &= !bNoNullMap && tNumValues==BASE::m_tHeader.GetSettings().m_iSubblockSize;
+
+	// if we want subblocks of more than 256 values, we should change storage format here
+	assert ( BASE::m_tHeader.GetSettings().m_iSubblockSize<=256 && iNumNonEmpty<=255 );
+	tWriter.Write_uint8 ( bNeedNullMap ? (uint8_t)iNumNonEmpty : (uint8_t)tNumValues );
 	if ( !bNeedNullMap )
 		return false;
 
@@ -304,27 +309,17 @@ bool Packer_String_c::WriteNullMap ( const Span_T<std::string> & dStrings, WRITE
 		iNullMapId = 0;
 	}
 
-	if ( iNullMapId )
-	{
-		// zero out unused values
-		memset ( m_dUncompressed32.data()+iNullMapId, 0, (m_dUncompressed32.size()-iNullMapId)*sizeof(m_dUncompressed32[0]) );
-		BitPack128 ( m_dUncompressed32, m_dCompressed, 1 );
-		m_tWriter.Write ( (uint8_t*)m_dCompressed.data(), m_dCompressed.size()*sizeof(m_dCompressed[0]) );
-	}
-
+	assert ( !iNullMapId ); // we store null maps only for full subblocks (128*n values)
 	return true;
 }
 
 template <typename WRITER>
-void Packer_String_c::WriteHashes ( const Span_T<std::string> & dStrings, WRITER & tWriter )
+void Packer_String_c::WriteHashes ( const Span_T<std::string> & dStrings, WRITER & tWriter, bool bNoNullMap )
 {
 	if ( !m_tHeader.HaveStringHashes() )
 		return;
 
-	bool HaveNullMap = false;
-	static const size_t WRITE_NULLS_THRESH = 256;
-	if ( dStrings.size()>WRITE_NULLS_THRESH )
-		HaveNullMap = WriteNullMap ( dStrings, tWriter );
+	bool bHaveNullMap = WriteNullMap ( dStrings, tWriter, bNoNullMap );
 
 	assert(m_fnHashCalc);
 
@@ -335,8 +330,8 @@ void Packer_String_c::WriteHashes ( const Span_T<std::string> & dStrings, WRITER
 		if ( iLen>0 )
 			uHash = m_fnHashCalc ( (const uint8_t*)i.c_str(), iLen, HASH_SEED );
 
-		// skip empty hashes if we have maps
-		if ( !HaveNullMap || ( HaveNullMap && iLen>0 ) )
+		// skip empty hashes if we have a null map
+		if ( !bHaveNullMap || ( bHaveNullMap && iLen>0 ) )
 			tWriter.Write_uint64(uHash);
 	}
 }
@@ -360,7 +355,7 @@ void Packer_String_c::WritePacked_Generic()
 		int iBlockValues = GetSubblockSize ( iBlock, iBlocks, (int)m_dCollected.size(), iSubblockSize );
 		m_dOffsets[iBlock] = tMemWriter.GetPos();
 
-		WriteHashes ( Span_T<std::string> ( &m_dCollected[iBlockStart], iBlockValues ), tMemWriter );
+		WriteHashes ( Span_T<std::string> ( &m_dCollected[iBlockStart], iBlockValues ), tMemWriter, false );
 
 		// write lengths
 		m_dTmpLengths.resize(iBlockValues);
