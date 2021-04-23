@@ -328,8 +328,8 @@ inline float UintToFloat ( uint32_t uValue )
 	return tUnion.m_fValue;
 }
 
-template<class T>
-const T * binary_search ( const std::vector<T> & dValues, const T & tValue )
+template<class T, class CONTAINER>
+const T * binary_search ( const CONTAINER & dValues, const T & tValue )
 {
 	auto tFirst = dValues.begin();
 	auto tLast = dValues.end();

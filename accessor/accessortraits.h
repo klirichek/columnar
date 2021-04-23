@@ -86,13 +86,11 @@ struct StoredBlockTraits_t : SubblockCalc_t
 {
 	using SubblockCalc_t::SubblockCalc_t;
 
-	uint32_t		m_tRequestedRowID = INVALID_ROW_ID;
-	int				m_iSubblockId = 0;
-	int				m_iValueIdInSubblock = 0;
-	uint32_t		m_uBlockId = INVALID_BLOCK_ID;
-	uint32_t		m_tStartBlockRowId = INVALID_ROW_ID;
-	int				m_iNumSubblocks = 0;
-	uint32_t		m_uNumDocsInBlock = 0;
+	uint32_t	m_tRequestedRowID = INVALID_ROW_ID;
+	uint32_t	m_uBlockId = INVALID_BLOCK_ID;
+	uint32_t	m_tStartBlockRowId = INVALID_ROW_ID;
+	int			m_iNumSubblocks = 0;
+	uint32_t	m_uNumDocsInBlock = 0;
 
 	void		SetBlockId ( uint32_t uBlockId, uint32_t uNumDocsInBlock );
 
@@ -310,12 +308,12 @@ FORCE_INLINE void DecodeValues_PFOR ( SpanResizeable_T<T> & dValues, FileReader_
 }
 
 template <typename T, bool PACK>
-FORCE_INLINE uint32_t PackValue ( const Span_T<T> & dValue, const uint8_t * & pValue )
+FORCE_INLINE uint32_t PackValue ( const Span_T<T> & dValue, uint8_t * & pValue )
 {
 	if ( PACK )
 		pValue = ByteCodec_c::PackData(dValue);
 	else
-		pValue = (const uint8_t*)dValue.data();
+		pValue = (uint8_t*)dValue.data();
 
 	return uint32_t ( dValue.size()*sizeof(T) );
 }

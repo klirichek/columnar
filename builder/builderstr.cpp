@@ -296,16 +296,17 @@ bool Packer_String_c::WriteNullMap ( const Span_T<std::string> & dStrings, WRITE
 		return false;
 
 	m_dUncompressed32.resize(128);
+	m_dCompressed.resize ( m_dUncompressed32.size() >> 5 );
 
 	int iNullMapId = 0;
 	for ( const auto & i : dStrings )
 	{
-		m_dUncompressed32[iNullMapId++] = i.empty() ? 1 : 0;
+		m_dUncompressed32[iNullMapId++] = i.empty() ? 0 : 1;
 		if ( iNullMapId!=128 )
 			continue;
 
 		BitPack128 ( m_dUncompressed32, m_dCompressed, 1 );
-		m_tWriter.Write ( (uint8_t*)m_dCompressed.data(), m_dCompressed.size()*sizeof(m_dCompressed[0]) );
+		tWriter.Write ( (uint8_t*)m_dCompressed.data(), m_dCompressed.size()*sizeof(m_dCompressed[0]) );
 		iNullMapId = 0;
 	}
 

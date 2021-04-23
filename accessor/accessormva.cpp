@@ -187,7 +187,7 @@ public:
 	FORCE_INLINE void	ReadHeader ( FileReader_c & tReader );
 
 	template <bool PACK>
-	FORCE_INLINE uint32_t	GetValue ( const uint8_t * & pValue ) const;
+	FORCE_INLINE uint32_t	GetValue ( uint8_t * & pValue ) const;
 
 private:
 	std::unique_ptr<IntCodec_i>	m_pCodec;
@@ -212,7 +212,7 @@ void StoredBlock_MvaConst_T<T>::ReadHeader ( FileReader_c & tReader )
 
 template <typename T>
 template <bool PACK>
-uint32_t StoredBlock_MvaConst_T<T>::GetValue ( const uint8_t * & pValue ) const
+uint32_t StoredBlock_MvaConst_T<T>::GetValue ( uint8_t * & pValue ) const
 {
 	return PackValue<T,PACK> ( m_dValueSpan, pValue );
 }
@@ -229,7 +229,7 @@ public:
 	FORCE_INLINE void	ReadSubblock ( int iSubblockId, int iSubblockValues, FileReader_c & tReader );
 
 	template <bool PACK>
-	FORCE_INLINE uint32_t	GetValue ( const uint8_t * & pValue, int iIdInSubblock ) const;
+	FORCE_INLINE uint32_t	GetValue ( uint8_t * & pValue, int iIdInSubblock ) const;
 	FORCE_INLINE const std::vector<Span_T<T>> & GetAllValues() const { return m_dValuePtrs; }
 
 private:
@@ -303,7 +303,7 @@ void StoredBlock_MvaConstLen_T<T>::PrecalcSizeOffset( int iNumSubblockValues )
 
 template <typename T>
 template <bool PACK>
-uint32_t StoredBlock_MvaConstLen_T<T>::GetValue ( const uint8_t * & pValue, int iIdInSubblock ) const
+uint32_t StoredBlock_MvaConstLen_T<T>::GetValue ( uint8_t * & pValue, int iIdInSubblock ) const
 {
 	return PackValue<T,PACK> ( m_dValuePtrs[iIdInSubblock], pValue );
 }
@@ -320,7 +320,7 @@ public:
 	FORCE_INLINE void			ReadSubblock ( int iSubblockId, int iNumValues, FileReader_c & tReader );
 
 	template <bool PACK>
-	FORCE_INLINE uint32_t		GetValue ( const uint8_t * & pValue, int iIdInSubblock );
+	FORCE_INLINE uint32_t		GetValue ( uint8_t * & pValue, int iIdInSubblock );
 	FORCE_INLINE const Span_T<uint32_t> & GetValueIndexes() const { return m_tValuesRead; }
 
 	template <typename T_COMP>
@@ -393,7 +393,7 @@ void StoredBlock_MvaTable_T<T>::ReadSubblock ( int iSubblockId, int iNumValues, 
 
 template <typename T>
 template <bool PACK>
-uint32_t StoredBlock_MvaTable_T<T>::GetValue ( const uint8_t * & pValue, int iIdInSubblock )
+uint32_t StoredBlock_MvaTable_T<T>::GetValue ( uint8_t * & pValue, int iIdInSubblock )
 {
 	return PackValue<T,PACK> ( m_dValuePtrs [ m_dValueIndexes[iIdInSubblock] ], pValue );
 }
@@ -410,7 +410,7 @@ public:
 	FORCE_INLINE void		ReadSubblock ( int iSubblockId, FileReader_c & tReader );
 
 	template <bool PACK>
-	FORCE_INLINE uint32_t	GetValue ( const uint8_t * & pValue, int iIdInSubblock ) const;
+	FORCE_INLINE uint32_t	GetValue ( uint8_t * & pValue, int iIdInSubblock ) const;
 	FORCE_INLINE const std::vector<Span_T<T>> & GetAllValues() const { return m_dValuePtrs; }
 
 private:
@@ -477,7 +477,7 @@ void StoredBlock_MvaPFOR_T<T>::ReadSubblock ( int iSubblockId, FileReader_c & tR
 
 template <typename T>
 template <bool PACK>
-FORCE_INLINE uint32_t StoredBlock_MvaPFOR_T<T>::GetValue ( const uint8_t * & pValue, int iIdInSubblock ) const
+FORCE_INLINE uint32_t StoredBlock_MvaPFOR_T<T>::GetValue ( uint8_t * & pValue, int iIdInSubblock ) const
 {
 	return PackValue<T,PACK> ( m_dValuePtrs[iIdInSubblock], pValue );
 }
@@ -506,7 +506,7 @@ protected:
 
 	MvaPacking_e					m_ePacking = MvaPacking_e::CONST;
 
-	const uint8_t *					m_pResult = nullptr;
+	uint8_t *						m_pResult = nullptr;
 	size_t							m_tValueLength = 0;
 
 	FORCE_INLINE void				SetCurBlock ( uint32_t uBlockId );
@@ -623,12 +623,13 @@ class Iterator_MVA_T : public Iterator_i, public Accessor_MVA_T<T>
 public:
 	uint32_t	AdvanceTo ( uint32_t tRowID ) final;
 
-	int64_t		Get() final;
-	int			Get ( const uint8_t * & pData, bool bPack ) final;
-	int			GetLength() const final;
+	int64_t		Get() final						{ assert ( 0 && "INTERNAL ERROR: requesting int from MVA iterator" ); return 0; }
+	int			Get ( const uint8_t * & pData ) final;
+	uint8_t *	GetPacked() final;
+	int			GetLength() final				{ assert ( 0 && "INTERNAL ERROR: requesting blob length from MVA iterator" ); return 0;	 }
 
-	uint64_t	GetStringHash() final { return 0; }
-	bool		HaveStringHashes() const final { return false; }
+	uint64_t	GetStringHash() final			{ return 0; }
+	bool		HaveStringHashes() const final	{ return false; }
 };
 
 template <typename T>
@@ -644,25 +645,10 @@ uint32_t Iterator_MVA_T<T>::AdvanceTo ( uint32_t tRowID )
 }
 
 template <typename T>
-int64_t Iterator_MVA_T<T>::Get()
+int Iterator_MVA_T<T>::Get ( const uint8_t * & pData )
 {
-	assert ( 0 && "INTERNAL ERROR: requesting int from MVA iterator" );
-	return 0;
-}
-
-template <typename T>
-int Iterator_MVA_T<T>::Get ( const uint8_t * & pData, bool bPack )
-{
-	if ( bPack )
-	{
-		assert(BASE::m_fnReadValuePacked);
-		(*this.*BASE::m_fnReadValuePacked)();
-	}
-	else
-	{
-		assert(BASE::m_fnReadValue);
-		(*this.*BASE::m_fnReadValue)();
-	}
+	assert(BASE::m_fnReadValue);
+	(*this.*BASE::m_fnReadValue)();
 
 	pData = BASE::m_pResult;
 	BASE::m_pResult = nullptr;
@@ -671,10 +657,15 @@ int Iterator_MVA_T<T>::Get ( const uint8_t * & pData, bool bPack )
 }
 
 template <typename T>
-int Iterator_MVA_T<T>::GetLength() const
+uint8_t * Iterator_MVA_T<T>::GetPacked()
 {
-	assert ( 0 && "INTERNAL ERROR: requesting blob length from MVA iterator" );
-	return 0;
+	assert(BASE::m_fnReadValuePacked);
+	(*this.*BASE::m_fnReadValuePacked)();
+
+	uint8_t * pData = BASE::m_pResult;
+	BASE::m_pResult = nullptr;
+
+	return pData;
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -721,7 +712,7 @@ public:
 template<typename T, typename T_COMP, typename FUNC>
 bool AnalyzerBlock_MVA_Const_c::SetupNextBlock ( const StoredBlock_MvaConst_T<T> & tBlock )
 {
-	const uint8_t * pValue = nullptr;
+	uint8_t * pValue = nullptr;
 	uint32_t uLength = tBlock.template GetValue<false>(pValue);
 	Span_T<T_COMP> tCheck ( (T_COMP*)pValue, uLength/sizeof(T_COMP) );
 

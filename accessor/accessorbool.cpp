@@ -178,19 +178,20 @@ class Iterator_Bool_c : public Iterator_i, public Accessor_Bool_c
 	using BASE::Accessor_Bool_c;
 
 public:
-	uint32_t		AdvanceTo ( uint32_t tRowID ) final;
+	uint32_t	AdvanceTo ( uint32_t tRowID ) final;
 
-	int64_t	Get() final;
+	int64_t		Get() final;
 
-	int			Get ( const uint8_t * & pData, bool bPack ) final;
-	int			GetLength() const final;
+	int			Get ( const uint8_t * & pData ) final	{ assert ( 0 && "INTERNAL ERROR: requesting blob from bool iterator" ); return 0; }
+	uint8_t *	GetPacked() final						{ assert ( 0 && "INTERNAL ERROR: requesting blob from bool iterator" ); return nullptr; }
+	int			GetLength() final						{ assert ( 0 && "INTERNAL ERROR: requesting string length from bool iterator" ); return 0; }
 
-	uint64_t	GetStringHash() final { return 0; }
-	bool		HaveStringHashes() const final { return false; }
+	uint64_t	GetStringHash() final					{ return 0; }
+	bool		HaveStringHashes() const final			{ return false; }
 };
 
 
-uint32_t	Iterator_Bool_c::AdvanceTo ( uint32_t tRowID )
+uint32_t Iterator_Bool_c::AdvanceTo ( uint32_t tRowID )
 {
 	uint32_t uBlockId = RowId2BlockId(tRowID);
 	if ( uBlockId!=BASE::m_uBlockId )
@@ -208,26 +209,12 @@ int64_t Iterator_Bool_c::Get()
 	return (*this.*BASE::m_fnReadValue)();
 }
 
-
-int Iterator_Bool_c::Get ( const uint8_t * & pData, bool bPack )
-{
-	assert ( 0 && "INTERNAL ERROR: requesting blob from bool iterator" );
-	return 0;
-}
-
-
-int Iterator_Bool_c::GetLength() const
-{
-	assert ( 0 && "INTERNAL ERROR: requesting string length from bool iterator" );
-	return 0;
-}
-
 //////////////////////////////////////////////////////////////////////////
 
 class AnalyzerBlock_Bool_Const_c
 {
 public:
-						AnalyzerBlock_Bool_Const_c ( uint32_t & tRowID );
+						AnalyzerBlock_Bool_Const_c ( uint32_t & tRowID ) : m_tRowID ( tRowID ) {}
 
 	FORCE_INLINE bool	SetupNextBlock ( const StoredBlock_Bool_Const_c & tBlock );
 	FORCE_INLINE int	ProcessSubblock ( uint32_t * & pRowID, int iNumValues );
@@ -237,11 +224,6 @@ private:
 	uint32_t &			m_tRowID;
 	bool				m_bFilterValue = false;
 };
-
-
-AnalyzerBlock_Bool_Const_c::AnalyzerBlock_Bool_Const_c ( uint32_t & tRowID )
-	: m_tRowID ( tRowID )
-{}
 
 
 bool AnalyzerBlock_Bool_Const_c::SetupNextBlock ( const StoredBlock_Bool_Const_c & tBlock )
@@ -268,7 +250,7 @@ int AnalyzerBlock_Bool_Const_c::ProcessSubblock ( uint32_t * & pRowID, int iNumV
 class AnalyzerBlock_Bool_Bitmap_c
 {
 public:
-						AnalyzerBlock_Bool_Bitmap_c ( uint32_t & tRowID );
+						AnalyzerBlock_Bool_Bitmap_c ( uint32_t & tRowID ) : m_tRowID ( tRowID ) {}
 
 	FORCE_INLINE int	ProcessSubblock ( uint32_t * & pRowID, const Span_T<uint32_t> & dValues );
 	void				Setup ( bool bFilterValue ) { m_bFilterValue=bFilterValue; }
@@ -277,11 +259,6 @@ private:
 	uint32_t &			m_tRowID;
 	bool				m_bFilterValue = false;
 };
-
-
-AnalyzerBlock_Bool_Bitmap_c::AnalyzerBlock_Bool_Bitmap_c ( uint32_t & tRowID )
-	: m_tRowID ( tRowID )
-{}
 
 
 int AnalyzerBlock_Bool_Bitmap_c::ProcessSubblock ( uint32_t * & pRowID, const Span_T<uint32_t> & dValues )
@@ -333,8 +310,8 @@ private:
 
 	int			ProcessSubblockConst ( uint32_t * & pRowID, int iSubblockIdInBlock );
 	int			ProcessSubblockBitmap ( uint32_t * & pRowID, int iSubblockIdInBlock );
-	int			ProcessSubblockAny ( uint32_t * & pRowID, int iSubblockIdInBlock );
-	int			ProcessSubblockNone ( uint32_t * & pRowID, int iSubblockIdInBlock );
+	int			ProcessSubblockAny ( uint32_t * & pRowID, int iSubblockIdInBlock )	{ return m_tBlockConst.ProcessSubblock ( pRowID, ACCESSOR::GetNumSubblockValues(iSubblockIdInBlock) ); }
+	int			ProcessSubblockNone ( uint32_t * & pRowID, int iSubblockIdInBlock )	{ return iSubblockIdInBlock; }
 
 	bool		MoveToBlock ( int iNextBlock ) final;
 };
@@ -423,18 +400,6 @@ int Analyzer_Bool_T<HAVE_MATCHING_BLOCKS>::ProcessSubblockBitmap ( uint32_t * & 
 {
 	ACCESSOR::m_tBlockBitmap.ReadSubblock ( iSubblockIdInBlock, StoredBlockTraits_t::GetNumSubblockValues(iSubblockIdInBlock), *ACCESSOR::m_pReader );
 	return m_tBlockBitmap.ProcessSubblock ( pRowID, ACCESSOR::m_tBlockBitmap.GetValues() );
-}
-
-template <bool HAVE_MATCHING_BLOCKS>
-int Analyzer_Bool_T<HAVE_MATCHING_BLOCKS>::ProcessSubblockAny ( uint32_t * & pRowID, int iSubblockIdInBlock )
-{
-	return m_tBlockConst.ProcessSubblock ( pRowID, ACCESSOR::GetNumSubblockValues(iSubblockIdInBlock) );
-}
-
-template <bool HAVE_MATCHING_BLOCKS>
-int Analyzer_Bool_T<HAVE_MATCHING_BLOCKS>::ProcessSubblockNone ( uint32_t * & pRowID, int iSubblockIdInBlock )
-{
-	return iSubblockIdInBlock;
 }
 
 template <bool HAVE_MATCHING_BLOCKS>

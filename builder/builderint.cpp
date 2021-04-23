@@ -98,7 +98,7 @@ public:
 	void				AddDoc ( const int64_t * pData, int iLength ) override;
 	void				Flush() override;
 
-protected:
+private:
 	T						m_tMin = T(0);
 	T						m_tMax = T(0);
 	T						m_tPrevValue = T(0);
@@ -114,19 +114,31 @@ protected:
 	std::vector<uint8_t>	m_dTmpBuffer;
 	std::vector<T>			m_dCollected;
 
-	void				AnalyzeCollected ( int64_t tAttr );
+	std::unique_ptr<IntCodec_i>	m_pCodec;
+	std::vector<uint32_t>	m_dCompressed;
+	std::vector<T>			m_dUncompressed;
+	std::vector<uint32_t>	m_dUncompressed32;
+	std::vector<uint8_t>	m_dTmpBuffer2;
+	std::vector<uint32_t>	m_dSubblockSizes;
 
-	virtual IntPacking_e ChoosePacking() const;
+	void				AnalyzeCollected ( int64_t tAttr );
+	IntPacking_e		ChoosePacking() const;
+	void				WriteToFile ( IntPacking_e ePacking );
 
 	void				WritePacked_Const();
 	void				WritePacked_Table();
 
-	virtual void		WriteToFile ( IntPacking_e ePacking );
+	template <typename U, typename WRITER>
+	void				WriteSubblock_Delta ( const Span_T<U> & dSubblockValues, WRITER & tWriter, std::vector<U> & dTmp, bool bWriteFlag );
+
+	template <typename WRITESUBBLOCK>
+	void				WritePacked_PFOR ( IntPacking_e ePacking, WRITESUBBLOCK && fnWriteSubblock );
 };
 
 template <typename T, typename HEADER>
 Packer_Int_T<T,HEADER>::Packer_Int_T ( const Settings_t & tSettings, const std::string & sName, AttrType_e eType )
 	: BASE ( tSettings, sName, eType )
+	, m_pCodec ( CreateIntCodec ( tSettings.m_sCompressionUINT32, tSettings.m_sCompressionUINT64 ) )
 {
 	assert ( tSettings.m_iSubblockSize==128 );
 	m_dTableIndexes.resize ( tSettings.m_iSubblockSize );
@@ -216,7 +228,16 @@ void Packer_Int_T<T,HEADER>::WriteToFile ( IntPacking_e ePacking )
 		break;
 
 	case IntPacking_e::DELTA:
+		WritePacked_PFOR ( ePacking, [this]( const Span_T<T> & dSubblockValues, MemWriter_c & tWriter )
+			{ WriteSubblock_Delta ( dSubblockValues, tWriter, m_dUncompressed, true ); }
+		);
+		break;
+
 	case IntPacking_e::GENERIC:
+		WritePacked_PFOR ( ePacking, [this]( const Span_T<T> & dSubblockValues, MemWriter_c & tWriter )
+			{ WriteValues_PFOR ( dSubblockValues, m_dUncompressed, m_dCompressed, tWriter, m_pCodec.get(), false ); }
+		);
+
 		assert ( 0 && "Packing should be implemented in descendants");
 		break;
 
@@ -269,92 +290,13 @@ void Packer_Int_T<T,HEADER>::WritePacked_Table()
 
 	// write the table
 	m_tWriter.Write_uint8 ( (uint8_t)m_dUniques.size() );
-	m_tWriter.Pack_uint64 ( (uint64_t)m_dUniques[0] );
-	for ( size_t i = 1; i < m_dUniques.size(); i++ )
-		m_tWriter.Pack_uint64 ( uint64_t ( m_dUniques[i] - m_dUniques[i-1] ) );
-
+	WriteValues_Delta_PFOR ( Span_T<T>(m_dUniques), m_dUncompressed, m_dCompressed, m_tWriter, m_pCodec.get() );
 	WriteTableOrdinals ( m_dUniques, m_hUnique, m_dCollected, m_dTableIndexes, m_dTablePacked, m_tWriter );
-}
-
-//////////////////////////////////////////////////////////////////////////
-
-template <typename T, typename HEADER>
-class Packer_Int_PFOR_T : public Packer_Int_T<T,HEADER>
-{
-	using BASE = Packer_Int_T<T,HEADER>;
-	using BASE::m_bMonoAsc;
-	using BASE::m_dTmpBuffer;
-	using BASE::m_dCollected;
-	using BASE::BASE::m_tWriter;
-	using BASE::BASE::m_tHeader;
-
-public:
-					Packer_Int_PFOR_T ( const Settings_t & tSettings, const std::string & sName, AttrType_e eAttr );
-
-protected:
-	IntPacking_e	ChoosePacking() const override;
-	void			WriteToFile ( IntPacking_e ePacking ) override;
-
-private:
-	std::unique_ptr<IntCodec_i>	m_pCodec;
-	std::vector<uint32_t>		m_dCompressed;
-	std::vector<T>				m_dUncompressed;
-	std::vector<uint32_t>		m_dUncompressed32;
-	std::vector<uint8_t>		m_dTmpBuffer2;
-	std::vector<uint32_t>		m_dSubblockSizes;
-
-	template <typename U, typename WRITER>
-	void			WriteSubblock_Delta ( const Span_T<U> & dSubblockValues, WRITER & tWriter, std::vector<U> & dTmp, bool bWriteFlag );
-
-	template <typename WRITESUBBLOCK>
-	void			WritePacked_PFOR ( IntPacking_e ePacking, WRITESUBBLOCK && fnWriteSubblock );
-};
-
-
-template <typename T, typename HEADER>
-Packer_Int_PFOR_T<T,HEADER>::Packer_Int_PFOR_T ( const Settings_t & tSettings, const std::string & sName, AttrType_e eAttr )
-	: BASE ( tSettings, sName, eAttr )
-	, m_pCodec ( CreateIntCodec ( tSettings.m_sCompressionUINT32, tSettings.m_sCompressionUINT64 ) )
-{}
-
-template <typename T, typename HEADER>
-IntPacking_e Packer_Int_PFOR_T<T,HEADER>::ChoosePacking() const
-{
-	IntPacking_e ePacking = BASE::ChoosePacking();
-	switch ( ePacking )
-	{
-	case IntPacking_e::DELTA:	return IntPacking_e::DELTA_PFOR;
-	case IntPacking_e::GENERIC:	return IntPacking_e::GENERIC_PFOR;
-	default:					return ePacking;
-	}
-}
-
-template <typename T, typename HEADER>
-void Packer_Int_PFOR_T<T,HEADER>::WriteToFile ( IntPacking_e ePacking )
-{
-	switch ( ePacking )
-	{
-	case IntPacking_e::DELTA_PFOR:
-		WritePacked_PFOR ( ePacking, [this]( const Span_T<T> & dSubblockValues, MemWriter_c & tWriter )
-			{ WriteSubblock_Delta ( dSubblockValues, tWriter, m_dUncompressed, true ); }
-		);
-		break;
-
-	case IntPacking_e::GENERIC_PFOR:
-		WritePacked_PFOR ( ePacking, [this]( const Span_T<T> & dSubblockValues, MemWriter_c & tWriter )
-			{ WriteValues_PFOR ( dSubblockValues, m_dUncompressed, m_dCompressed, tWriter, m_pCodec.get(), false ); }
-		);
-		break;
-
-	default:
-		BASE::WriteToFile(ePacking);
-		break;
-	}
 }
 
 template <typename T, typename HEADER>
 template <typename U, typename WRITER>
-void Packer_Int_PFOR_T<T,HEADER>::WriteSubblock_Delta ( const Span_T<U> & dSubblockValues, WRITER & tWriter, std::vector<U> & dTmp, bool bWriteFlag )
+void Packer_Int_T<T,HEADER>::WriteSubblock_Delta ( const Span_T<U> & dSubblockValues, WRITER & tWriter, std::vector<U> & dTmp, bool bWriteFlag )
 {
 	dTmp.resize ( dSubblockValues.size() );
 	memcpy ( dTmp.data(), dSubblockValues.data(), dSubblockValues.size()*sizeof(dSubblockValues[0]) );
@@ -373,7 +315,7 @@ void Packer_Int_PFOR_T<T,HEADER>::WriteSubblock_Delta ( const Span_T<U> & dSubbl
 
 template <typename T, typename HEADER>
 template <typename WRITESUBBLOCK>
-void Packer_Int_PFOR_T<T,HEADER>::WritePacked_PFOR ( IntPacking_e ePacking, WRITESUBBLOCK && fnWriteSubblock )
+void Packer_Int_T<T,HEADER>::WritePacked_PFOR ( IntPacking_e ePacking, WRITESUBBLOCK && fnWriteSubblock )
 {
 	m_tWriter.Pack_uint32 ( to_underlying(ePacking) );
 
@@ -414,32 +356,28 @@ void Packer_Int_PFOR_T<T,HEADER>::WritePacked_PFOR ( IntPacking_e ePacking, WRIT
 	m_tWriter.Write ( m_dTmpBuffer.data(), m_dTmpBuffer.size()*sizeof ( m_dTmpBuffer[0] ) );
 }
 
+
 //////////////////////////////////////////////////////////////////////////
 
-class Packer_Float_c : public Packer_Int_PFOR_T<uint32_t, AttributeHeaderBuilder_Float_c>
+class Packer_Float_c : public Packer_Int_T<uint32_t, AttributeHeaderBuilder_Float_c>
 {
-	using BASE = Packer_Int_PFOR_T<uint32_t, AttributeHeaderBuilder_Float_c>;
+	using BASE = Packer_Int_T<uint32_t, AttributeHeaderBuilder_Float_c>;
 
 public:
-				Packer_Float_c ( const Settings_t & tSettings, const std::string & sName );
+	Packer_Float_c ( const Settings_t & tSettings, const std::string & sName ) : BASE ( tSettings, sName, AttrType_e::FLOAT ) {}
 };
-
-
-Packer_Float_c::Packer_Float_c ( const Settings_t & tSettings, const std::string & sName )
-	: BASE ( tSettings, sName, AttrType_e::FLOAT )
-{}
 
 //////////////////////////////////////////////////////////////////////////
 
 Packer_i * CreatePackerUint32 ( const Settings_t & tSettings, const std::string & sName )
 {
-	return new Packer_Int_PFOR_T<uint32_t,AttributeHeaderBuilder_Int_T<uint32_t>> ( tSettings, sName, AttrType_e::UINT32 );
+	return new Packer_Int_T<uint32_t,AttributeHeaderBuilder_Int_T<uint32_t>> ( tSettings, sName, AttrType_e::UINT32 );
 }
 
 
 Packer_i * CreatePackerUint64 ( const Settings_t & tSettings, const std::string & sName )
 {
-	return new Packer_Int_PFOR_T<uint64_t,AttributeHeaderBuilder_Int_T<uint64_t>> ( tSettings, sName, AttrType_e::INT64 );
+	return new Packer_Int_T<uint64_t,AttributeHeaderBuilder_Int_T<uint64_t>> ( tSettings, sName, AttrType_e::INT64 );
 }
 
 

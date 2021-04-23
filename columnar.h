@@ -23,7 +23,7 @@
 namespace columnar
 {
 
-static const int LIB_VERSION = 6;
+static const int LIB_VERSION = 7;
 
 class Iterator_i
 {
@@ -34,8 +34,9 @@ public:
 
 	virtual	int64_t		Get() = 0;
 
-	virtual	int			Get ( const uint8_t * & pData, bool bPack ) = 0;
-	virtual	int			GetLength() const = 0;
+	virtual	int			Get ( const uint8_t * & pData ) = 0;
+	virtual	uint8_t *	GetPacked() = 0;
+	virtual	int			GetLength() = 0;
 
 	virtual uint64_t	GetStringHash() = 0;
 	virtual bool		HaveStringHashes() const = 0;
