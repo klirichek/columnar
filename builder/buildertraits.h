@@ -197,6 +197,12 @@ static void WriteValues_PFOR ( const Span_T<T> & dValues, std::vector<T> & dTmpU
 	tWriter.Write ( (const uint8_t*)dTmpCompressed.data(), dTmpCompressed.size()*sizeof ( dTmpCompressed[0] ) );
 }
 
+
+void BitPack128 ( const std::vector<uint32_t> & dValues, std::vector<uint32_t> & dPacked, int iBits );
+void BitUnpack128 ( const std::vector<uint32_t> & dPacked, std::vector<uint32_t> & dValues, int iBits );
+void BitUnpack128 ( const Span_T<uint32_t> & dPacked, Span_T<uint32_t> & dValues, int iBits );
+
+
 template <typename UNIQ_VEC, typename UNIQ_HASH, typename COLLECTED>
 void WriteTableOrdinals ( UNIQ_VEC & dUniques, UNIQ_HASH & hUnique, COLLECTED & dCollected, std::vector<uint32_t> & dTableIndexes, std::vector<uint32_t> & dCompressed, FileWriter_c & tWriter )
 {
@@ -229,11 +235,7 @@ void WriteTableOrdinals ( UNIQ_VEC & dUniques, UNIQ_HASH & hUnique, COLLECTED & 
 	}
 }
 
-
-void			BitPack128 ( const std::vector<uint32_t> & dValues, std::vector<uint32_t> & dPacked, int iBits );
-void			BitUnpack128 ( const std::vector<uint32_t> & dPacked, std::vector<uint32_t> & dValues, int iBits );
-void			BitUnpack128 ( const Span_T<uint32_t> & dPacked, Span_T<uint32_t> & dValues, int iBits );
-IntCodec_i *	CreateIntCodec ( const std::string & sCodec32, const std::string & sCodec64 );
+IntCodec_i * CreateIntCodec ( const std::string & sCodec32, const std::string & sCodec64 );
 
 } // namespace columnar
 
