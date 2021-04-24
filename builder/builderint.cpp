@@ -237,8 +237,6 @@ void Packer_Int_T<T,HEADER>::WriteToFile ( IntPacking_e ePacking )
 		WritePacked_PFOR ( ePacking, [this]( const Span_T<T> & dSubblockValues, MemWriter_c & tWriter )
 			{ WriteValues_PFOR ( dSubblockValues, m_dUncompressed, m_dCompressed, tWriter, m_pCodec.get(), false ); }
 		);
-
-		assert ( 0 && "Packing should be implemented in descendants");
 		break;
 
 	default:
@@ -317,8 +315,6 @@ template <typename T, typename HEADER>
 template <typename WRITESUBBLOCK>
 void Packer_Int_T<T,HEADER>::WritePacked_PFOR ( IntPacking_e ePacking, WRITESUBBLOCK && fnWriteSubblock )
 {
-	m_tWriter.Pack_uint32 ( to_underlying(ePacking) );
-
 	int iSubblockSize = m_tHeader.GetSettings().m_iSubblockSize;
 	int iBlocks = ( (int)m_dCollected.size() + iSubblockSize - 1 ) / iSubblockSize;
 
