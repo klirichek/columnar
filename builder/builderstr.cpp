@@ -24,8 +24,6 @@
 namespace columnar
 {
 
-static const uint64_t HASH_SEED = 0xCBF29CE484222325ULL;
-
 class AttributeHeaderBuilder_String_c : public AttributeHeaderBuilder_c
 {
 	using BASE = AttributeHeaderBuilder_c;
@@ -329,7 +327,7 @@ void Packer_String_c::WriteHashes ( const Span_T<std::string> & dStrings, WRITER
 		int iLen = (int)i.length();
 		uint64_t uHash = 0;
 		if ( iLen>0 )
-			uHash = m_fnHashCalc ( (const uint8_t*)i.c_str(), iLen, HASH_SEED );
+			uHash = m_fnHashCalc ( (const uint8_t*)i.c_str(), iLen, STR_HASH_SEED );
 
 		// skip empty hashes if we have a null map
 		if ( !bHaveNullMap || ( bHaveNullMap && iLen>0 ) )

@@ -27,8 +27,12 @@ enum class StrPacking_e : uint32_t
 	CONST = 0,
 	CONSTLEN,
 	TABLE,
-	GENERIC
+	GENERIC,
+
+	TOTAL
 };
+
+const uint64_t STR_HASH_SEED = 0xCBF29CE484222325ULL;
 
 class Packer_i;
 Packer_i * CreatePackerStr ( const Settings_t & tSettings, const std::string & sName, StringHash_fn fnHashCalc );

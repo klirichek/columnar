@@ -76,7 +76,8 @@ enum class FilterType_e
 	NONE,
 	VALUES,
 	RANGE,
-	FLOATRANGE
+	FLOATRANGE,
+	STRINGS
 };
 
 
@@ -87,6 +88,8 @@ enum class MvaAggr_e
 	ANY
 };
 
+using StringHash_fn = uint64_t (*)( const uint8_t * pStr, int iLen, uint64_t uPrev );
+using StringCmp_fn = int (*) ( std::pair<const uint8_t *, int> tStrA, std::pair<const uint8_t *, int> tStrB, bool bPacked );
 
 struct Filter_t
 {
@@ -103,7 +106,11 @@ struct Filter_t
 	bool					m_bLeftClosed = true;
 	bool					m_bRightClosed = true;
 
+	StringHash_fn			m_fnCalcStrHash = nullptr;
+	StringCmp_fn			m_fnStrCmp = nullptr;
+
 	std::vector<int64_t>	m_dValues;
+	std::vector<std::vector<uint8_t>> m_dStringValues;
 };
 
 enum class AttrType_e : uint32_t
