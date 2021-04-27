@@ -133,19 +133,39 @@ Span_T<uint8_t> StoredBlock_StrConst_c::GetValue()
 class StoredBlock_StrConstLen_c
 {
 public:
-	FORCE_INLINE void		ReadHeader ( FileReader_c & tReader, int iValues, bool bHaveStringHashes );
+									StoredBlock_StrConstLen_c ( int iSubblockSize );
+
+	FORCE_INLINE void				ReadHeader ( FileReader_c & tReader, int iValues, bool bHaveStringHashes );
 	template <bool PACK>
-	FORCE_INLINE Span_T<uint8_t> ReadValue ( FileReader_c & tReader, int iIdInBlock );
-	FORCE_INLINE int		GetValueLength() const { return (int)m_tValuesOffset; }
-	FORCE_INLINE uint64_t	GetHash ( FileReader_c & tReader, int iIdInBlock );
+	FORCE_INLINE Span_T<uint8_t>	ReadValue ( FileReader_c & tReader, int iIdInBlock );
+	FORCE_INLINE int				GetValueLength() const { return (int)m_tValuesOffset; }
+	FORCE_INLINE uint64_t			GetHash ( FileReader_c & tReader, int iIdInBlock );
+
+	FORCE_INLINE void				ReadSubblock ( int iSubblockIdInBlock, int iSubblockValues, FileReader_c & tReader );
+	FORCE_INLINE Span_T<uint64_t>	GetAllHashes() { return m_dHashes; }
+	FORCE_INLINE Span_T<uint64_t>	GetAllValueLengths() { return m_dLengths; }
+	FORCE_INLINE Span_T<Span_T<uint8_t>> & ReadAllSubblockValues ( int iSubblockIdInBlock, int iSubblockValues, FileReader_c & tReader );
 
 private:
-	int64_t					m_tHashOffset = 0;
-	int64_t					m_tValuesOffset = 0;
-	size_t					m_tValueLength = 0;
-	int						m_iLastReadId = -1;
-	std::vector<uint8_t>	m_dValue;
+	int							m_iSubblockSize = 0;
+	int64_t						m_tHashOffset = 0;
+	int64_t						m_tValuesOffset = 0;
+	size_t						m_tValueLength = 0;
+	int							m_iLastReadId = -1;
+	std::vector<uint8_t>		m_dValue;
+
+	SpanResizeable_T<uint64_t>	m_dHashes;
+	SpanResizeable_T<uint64_t>	m_dLengths;
+	SpanResizeable_T<uint8_t>	m_dAllValues;
+	SpanResizeable_T<Span_T<uint8_t>> m_dAllValuePtrs;
 };
+
+
+StoredBlock_StrConstLen_c::StoredBlock_StrConstLen_c ( int iSubblockSize )
+	: m_iSubblockSize ( iSubblockSize )
+{
+	m_dLengths.resize(iSubblockSize);
+}
 
 
 void StoredBlock_StrConstLen_c::ReadHeader ( FileReader_c & tReader, int iValues, bool bHaveStringHashes )
@@ -159,6 +179,9 @@ void StoredBlock_StrConstLen_c::ReadHeader ( FileReader_c & tReader, int iValues
 	}
 	else
 		m_tValuesOffset = tReader.GetPos();
+
+	for ( auto & i : m_dLengths )
+		i = tLength;
 
 	m_tValueLength = tLength;
 	m_dValue.resize(m_tValueLength);
@@ -215,6 +238,44 @@ uint64_t StoredBlock_StrConstLen_c::GetHash ( FileReader_c & tReader, int iIdInB
 	return tReader.Read_uint64();
 }
 
+
+void StoredBlock_StrConstLen_c::ReadSubblock ( int iSubblockIdInBlock, int iSubblockValues, FileReader_c & tReader )
+{
+	int iIdInBlock = iSubblockIdInBlock*m_iSubblockSize;
+	m_dHashes.resize(iSubblockValues);
+	tReader.Seek ( m_tHashOffset + int64_t(iIdInBlock)*sizeof(uint64_t) );
+	tReader.Read ( (uint8_t*)m_dHashes.data(), m_dHashes.size()*sizeof(m_dHashes[0]) );
+}
+
+
+Span_T<Span_T<uint8_t>> & StoredBlock_StrConstLen_c::ReadAllSubblockValues ( int iSubblockIdInBlock, int iSubblockValues, FileReader_c & tReader )
+{
+	int iIdInBlock = iSubblockIdInBlock*m_iSubblockSize;
+	tReader.Seek ( m_tValuesOffset + int64_t(iIdInBlock)*m_tValueLength );
+
+	uint64_t uTotalLength = m_tValueLength*iSubblockValues;
+	uint8_t * pAllData = nullptr;
+	if ( !tReader.ReadFromBuffer ( pAllData, uTotalLength ) )
+	{
+		// can't read directly from reader's buffer? read to a temp buffer then
+		m_dAllValues.resize(uTotalLength);
+		tReader.Read ( m_dAllValues.data(), uTotalLength );
+		pAllData = m_dAllValues.data();
+	}
+
+	m_dAllValuePtrs.resize ( m_dLengths.size() );
+	Span_T<uint8_t> * pValueSpan = m_dAllValuePtrs.data();
+	uint8_t * pValue = pAllData;
+	for ( int i = 0; i < iSubblockValues; i++ )
+	{
+		*pValueSpan = { pValue, m_tValueLength };
+		pValue += m_tValueLength;
+		pValueSpan++;
+	}
+
+	return m_dAllValuePtrs;
+}
+
 //////////////////////////////////////////////////////////////////////////
 
 class StoredBlock_StrTable_c : public StrHashReader_c
@@ -228,12 +289,7 @@ public:
 	FORCE_INLINE void		ReadSubblock ( int iSubblockId, int iNumValues, FileReader_c & tReader );
 	FORCE_INLINE int		GetValueLength ( int iIdInSubblock ) const	{ return m_dTableValueLengths[m_dValueIndexes[iIdInSubblock]]; }
 	template <bool PACK>
-	FORCE_INLINE Span_T<uint8_t> GetValue ( int iIdInSubblock )
-	{
-		assert (0 && "NIY");
-		return {};
-		//return { PackValue<uint8_t,PACK> ( m_dTableValues [ m_dValueIndexes[iIdInSubblock] ], pValue ), }; 
-	}
+	FORCE_INLINE Span_T<uint8_t> GetValue ( int iIdInSubblock );
 	FORCE_INLINE uint64_t	GetHash ( int iIdInSubblock ) const			{ return BASE::GetHash ( m_dValueIndexes[iIdInSubblock] ); }
 
 	FORCE_INLINE int		GetTableSize() const						{ return (int)m_dTableValueLengths.size(); }
@@ -299,6 +355,14 @@ void StoredBlock_StrTable_c::ReadSubblock ( int iSubblockId, int iNumValues, Fil
 	tReader.Seek ( m_iValuesOffset + uPackedSize*iSubblockId );
 	tReader.Read ( (uint8_t*)m_dEncoded.data(), uPackedSize );
 	BitUnpack128 ( m_dEncoded, m_dValueIndexes, m_iBits );
+}
+
+template <bool PACK>
+Span_T<uint8_t> StoredBlock_StrTable_c::GetValue ( int iIdInSubblock )
+{
+	uint8_t * pValue = nullptr;
+	uint32_t uLen = PackValue<uint8_t,PACK> ( m_dTableValues [ m_dValueIndexes[iIdInSubblock] ], pValue ); 
+	return {pValue, uLen};
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -371,6 +435,8 @@ void StoredBlock_StrGeneric_c::ReadSubblock ( int iSubblockId, int iSubblockValu
 		memcpy ( m_dCumulativeLengths.data(), m_dLengths.data(), m_dLengths.size()*sizeof(m_dLengths[0]) );
 		ComputeInverseDeltas ( m_dCumulativeLengths, true );
 	}
+	else
+		m_dLengths.resize(iSubblockValues);
 
 	m_iFirstValueOffset = tReader.GetPos();
 	m_iLastReadId = -1;
@@ -501,6 +567,7 @@ Accessor_String_c::Accessor_String_c ( const AttributeHeader_i & tHeader, FileRe
 	, m_tHeader ( tHeader )
 	, m_pReader ( pReader )
 	, m_tBlockTable ( tHeader.GetSettings().m_sCompressionUINT32, tHeader.GetSettings().m_sCompressionUINT64, tHeader.GetSettings().m_iSubblockSize )
+	, m_tBlockConstLen ( tHeader.GetSettings().m_iSubblockSize )
 	, m_tBlockGeneric ( tHeader.GetSettings().m_sCompressionUINT32, tHeader.GetSettings().m_sCompressionUINT64 )
 	, m_bNeedHashes ( bNeedHashes )
 {
@@ -647,7 +714,7 @@ uint64_t Iterator_String_c::GetStringHash()
 
 //////////////////////////////////////////////////////////////////////////
 
-template <bool USE_HASHES>
+template <bool USE_HASHES, bool EQ>
 class AnalyzerBlock_Str_T : public Filter_t
 {
 public:
@@ -659,34 +726,12 @@ protected:
 	uint32_t &	m_tRowID;
 	std::vector<uint64_t> m_dHashes;
 
-	// !!! FIXME! make an optimized version that works with only one value
-	template <typename GETVALUE>
-	FORCE_INLINE bool CompareStrings ( int iId, uint64_t uHash, uint64_t uLength, GETVALUE && fnGetValue )
-	{
-		if ( USE_HASHES )
-		{
-			for ( auto i : m_dHashes )
-				if ( i==uHash )
-					return true;
-		}
-		else
-		{
-			assert ( m_fnStrCmp );
-			for ( const auto & i : m_dStringValues )
-				if ( i.size()==uLength )
-				{
-					auto dValue = fnGetValue(iId);
-					if ( !m_fnStrCmp ( { i.data(), (int)i.size() }, { dValue.data(), (int)dValue.size() }, false ) )
-						return true;
-				}
-		}
-
-		return false;
-	}
+	template <bool SINGLEVALUE, typename GETVALUE>
+	FORCE_INLINE bool CompareStrings ( int iId, uint64_t uHash, uint64_t uLength, GETVALUE && fnGetValue );
 };
 
-template <bool USE_HASHES>
-void AnalyzerBlock_Str_T<USE_HASHES>::Setup ( const Filter_t & tSettings )
+template <bool USE_HASHES, bool EQ>
+void AnalyzerBlock_Str_T<USE_HASHES,EQ>::Setup ( const Filter_t & tSettings )
 {
 	*(Filter_t*)this = tSettings;
 
@@ -694,16 +739,63 @@ void AnalyzerBlock_Str_T<USE_HASHES>::Setup ( const Filter_t & tSettings )
 	{
 		m_dHashes.resize ( tSettings.m_dStringValues.size() );
 		for ( size_t i = 0; i < m_dHashes.size(); i++ )
-			m_dHashes[i] = m_fnCalcStrHash ( tSettings.m_dStringValues[i].data(), (int)tSettings.m_dStringValues[i].size(), STR_HASH_SEED );
+		{
+			int iLen = (int)tSettings.m_dStringValues[i].size();
+			m_dHashes[i] = iLen ? m_fnCalcStrHash ( tSettings.m_dStringValues[i].data(), iLen, STR_HASH_SEED ) : 0;
+		}
 	}
+}
+
+template <bool USE_HASHES, bool EQ>
+template <bool SINGLEVALUE, typename GETVALUE>
+bool AnalyzerBlock_Str_T<USE_HASHES,EQ>::CompareStrings ( int iId, uint64_t uHash, uint64_t uLength, GETVALUE && fnGetValue )
+{
+	if ( USE_HASHES )
+	{
+		if ( SINGLEVALUE )
+			return ( m_dHashes[0]==uHash ) ^ (!EQ);
+		else
+		{
+			for ( auto i : m_dHashes )
+				if ( i==uHash )
+					return true ^ (!EQ);
+		}
+	}
+	else
+	{
+		assert ( m_fnStrCmp );
+		if ( SINGLEVALUE )
+		{
+			auto & tString = m_dStringValues[0];
+			if ( tString.size()==uLength )
+			{
+				auto dValue = fnGetValue(iId);
+				return !m_fnStrCmp ( { tString.data(), (int)tString.size() }, { dValue.data(), (int)dValue.size() }, false ) ^ (!EQ);
+			}
+		}
+		else
+		{
+			for ( const auto & i : m_dStringValues )
+			{
+				if ( i.size()!=uLength )
+					continue;
+
+				auto dValue = fnGetValue(iId);
+				if ( !m_fnStrCmp ( { i.data(), (int)i.size() }, { dValue.data(), (int)dValue.size() }, false ) )
+					return true ^ (!EQ);
+			}
+		}
+	}
+
+	return false ^ (!EQ);
 }
 
 //////////////////////////////////////////////////////////////////////////
 
-template <bool USE_HASHES>
-class AnalyzerBlock_Str_Const_T : public AnalyzerBlock_Str_T<USE_HASHES>
+template <bool USE_HASHES, bool EQ>
+class AnalyzerBlock_Str_Const_T : public AnalyzerBlock_Str_T<USE_HASHES,EQ>
 {
-	using BASE = AnalyzerBlock_Str_T<USE_HASHES>;
+	using BASE = AnalyzerBlock_Str_T<USE_HASHES,EQ>;
 	using BASE::AnalyzerBlock_Str_T;
 
 public:
@@ -711,15 +803,15 @@ public:
 	FORCE_INLINE int	ProcessSubblock ( uint32_t * & pRowID, int iNumValues );
 };
 
-template <bool USE_HASHES>
-bool AnalyzerBlock_Str_Const_T<USE_HASHES>::SetupNextBlock ( StoredBlock_StrConst_c & tBlock )
+template <bool USE_HASHES, bool EQ>
+bool AnalyzerBlock_Str_Const_T<USE_HASHES,EQ>::SetupNextBlock ( StoredBlock_StrConst_c & tBlock )
 {
 	assert ( m_eType==FilterType_e::STRINGS );
-	return CompareStrings ( 0, tBlock.GetHash(), tBlock.GetValueLength(), [&tBlock](int){ return tBlock.GetValue<false>(); } );
+	return CompareStrings<false> ( 0, tBlock.GetHash(), tBlock.GetValueLength(), [&tBlock](int){ return tBlock.GetValue<false>(); } );
 }
 
-template <bool USE_HASHES>
-int AnalyzerBlock_Str_Const_T<USE_HASHES>::ProcessSubblock ( uint32_t * & pRowID, int iNumValues )
+template <bool USE_HASHES, bool EQ>
+int AnalyzerBlock_Str_Const_T<USE_HASHES,EQ>::ProcessSubblock ( uint32_t * & pRowID, int iNumValues )
 {
 	uint32_t tRowID = m_tRowID;
 
@@ -733,10 +825,10 @@ int AnalyzerBlock_Str_Const_T<USE_HASHES>::ProcessSubblock ( uint32_t * & pRowID
 
 //////////////////////////////////////////////////////////////////////////
 
-template <bool USE_HASHES>
-class AnalyzerBlock_Str_Table_T : public AnalyzerBlock_Str_T<USE_HASHES>
+template <bool USE_HASHES, bool EQ>
+class AnalyzerBlock_Str_Table_T : public AnalyzerBlock_Str_T<USE_HASHES,EQ>
 {
-	using BASE = AnalyzerBlock_Str_T<USE_HASHES>;
+	using BASE = AnalyzerBlock_Str_T<USE_HASHES,EQ>;
 	using BASE::AnalyzerBlock_Str_T;
 
 public:
@@ -747,8 +839,8 @@ private:
 	std::array<bool, UCHAR_MAX> m_dMap;
 };
 
-template <bool USE_HASHES>
-int AnalyzerBlock_Str_Table_T<USE_HASHES>::ProcessSubblock ( uint32_t * & pRowID, const Span_T<uint32_t> & dValueIndexes )
+template <bool USE_HASHES, bool EQ>
+int AnalyzerBlock_Str_Table_T<USE_HASHES,EQ>::ProcessSubblock ( uint32_t * & pRowID, const Span_T<uint32_t> & dValueIndexes )
 {
 	uint32_t tRowID = m_tRowID;
 
@@ -764,15 +856,15 @@ int AnalyzerBlock_Str_Table_T<USE_HASHES>::ProcessSubblock ( uint32_t * & pRowID
 	return (int)dValueIndexes.size();
 }
 
-template <bool USE_HASHES>
-bool AnalyzerBlock_Str_Table_T<USE_HASHES>::SetupNextBlock ( const StoredBlock_StrTable_c & tBlock )
+template <bool USE_HASHES, bool EQ>
+bool AnalyzerBlock_Str_Table_T<USE_HASHES,EQ>::SetupNextBlock ( const StoredBlock_StrTable_c & tBlock )
 {
 	assert ( m_eType==FilterType_e::STRINGS );
 	bool bAnythingMatches = false;
 
 	for ( int i = 0; i < tBlock.GetTableSize(); i++ )
 	{
-		m_dMap[i] = CompareStrings ( i, tBlock.GetTableValueHash(i), tBlock.GetTableValueLength(i), [&tBlock]( int iValue ){ return tBlock.GetTableValue(iValue); } );
+		m_dMap[i] = CompareStrings<false> ( i, tBlock.GetTableValueHash(i), tBlock.GetTableValueLength(i), [&tBlock]( int iValue ){ return tBlock.GetTableValue(iValue); } );
 		bAnythingMatches |= m_dMap[i];
 	}
 
@@ -781,27 +873,26 @@ bool AnalyzerBlock_Str_Table_T<USE_HASHES>::SetupNextBlock ( const StoredBlock_S
 
 //////////////////////////////////////////////////////////////////////////
 
-template <bool USE_HASHES>
-class AnalyzerBlock_Str_Values_T : public AnalyzerBlock_Str_T<USE_HASHES>
+template <bool USE_HASHES, bool EQ>
+class AnalyzerBlock_Str_Values_T : public AnalyzerBlock_Str_T<USE_HASHES,EQ>
 {
-	using BASE = AnalyzerBlock_Str_T<USE_HASHES>;
+	using BASE = AnalyzerBlock_Str_T<USE_HASHES,EQ>;
 	using BASE::AnalyzerBlock_Str_T;
 
 public:
-	template <typename READVALUE>
+	template <bool SINGLEVALUE, typename READVALUE>
 	FORCE_INLINE int	ProcessSubblock_Values ( uint32_t * & pRowID, const Span_T<uint64_t> & dHashes, const Span_T<uint64_t> & dLengths, READVALUE && fnReadValue );
 };
 
-template <bool USE_HASHES>
-template <typename READVALUE>
-int AnalyzerBlock_Str_Values_T<USE_HASHES>::ProcessSubblock_Values ( uint32_t * & pRowID, const Span_T<uint64_t> & dHashes, const Span_T<uint64_t> & dLengths, READVALUE && fnReadValue )
+template <bool USE_HASHES, bool EQ>
+template <bool SINGLEVALUE, typename READVALUE>
+int AnalyzerBlock_Str_Values_T<USE_HASHES,EQ>::ProcessSubblock_Values ( uint32_t * & pRowID, const Span_T<uint64_t> & dHashes, const Span_T<uint64_t> & dLengths, READVALUE && fnReadValue )
 {
 	uint32_t tRowID = m_tRowID;
 
-	// FIXME! use SSE here
 	for ( size_t i = 0; i < dHashes.size(); i++ )
 	{
-		if ( CompareStrings ( (int)i, dHashes[i], dLengths[i], fnReadValue ) )
+		if ( CompareStrings<SINGLEVALUE> ( (int)i, dHashes[i], dLengths[i], fnReadValue ) )
 			*pRowID++ = tRowID;
 
 		tRowID++;
@@ -813,7 +904,7 @@ int AnalyzerBlock_Str_Values_T<USE_HASHES>::ProcessSubblock_Values ( uint32_t * 
 
 //////////////////////////////////////////////////////////////////////////
 
-template <bool USE_HASHES, bool HAVE_MATCHING_BLOCKS>
+template <bool USE_HASHES, bool HAVE_MATCHING_BLOCKS, bool EQ>
 class Analyzer_String_T : public Analyzer_T<HAVE_MATCHING_BLOCKS>, public Accessor_String_c
 {
 	using ANALYZER = Analyzer_T<HAVE_MATCHING_BLOCKS>;
@@ -825,13 +916,13 @@ public:
 	bool		GetNextRowIdBlock ( Span_T<uint32_t> & dRowIdBlock ) final;
 
 private:
-	AnalyzerBlock_Str_Const_T<USE_HASHES>	m_tBlockConst;
-	AnalyzerBlock_Str_Table_T<USE_HASHES>	m_tBlockTable;
-	AnalyzerBlock_Str_Values_T<USE_HASHES>	m_tBlockValues;
+	AnalyzerBlock_Str_Const_T<USE_HASHES,EQ>	m_tBlockConst;
+	AnalyzerBlock_Str_Table_T<USE_HASHES,EQ>	m_tBlockTable;
+	AnalyzerBlock_Str_Values_T<USE_HASHES,EQ>	m_tBlockValues;
 
 	const Filter_t &				m_tSettings;
 
-	typedef int (Analyzer_String_T<USE_HASHES,HAVE_MATCHING_BLOCKS>::*ProcessSubblock_fn)( uint32_t * & pRowID, int iSubblockIdInBlock );
+	typedef int (Analyzer_String_T<USE_HASHES,HAVE_MATCHING_BLOCKS,EQ>::*ProcessSubblock_fn)( uint32_t * & pRowID, int iSubblockIdInBlock );
 	std::array<ProcessSubblock_fn, to_underlying ( StrPacking_e::TOTAL )> m_dProcessingFuncs;
 	ProcessSubblock_fn				m_fnProcessSubblock = nullptr;
 
@@ -839,18 +930,14 @@ private:
 
 	int			ProcessSubblockConst ( uint32_t * & pRowID, int iSubblockIdInBlock );
 	int			ProcessSubblockTable ( uint32_t * & pRowID, int iSubblockIdInBlock );
-
-	int			ProcessSubblockConstLen_SingleValue ( uint32_t * & pRowID, int iSubblockIdInBlock );
-	int			ProcessSubblockGeneric_SingleValue ( uint32_t * & pRowID, int iSubblockIdInBlock );
-
-	int			ProcessSubblockConstLen_Values ( uint32_t * & pRowID, int iSubblockIdInBlock );
-	int			ProcessSubblockGeneric_Values ( uint32_t * & pRowID, int iSubblockIdInBlock );
+	template<bool SINGLEVALUE> int	ProcessSubblockConstLen ( uint32_t * & pRowID, int iSubblockIdInBlock );
+	template<bool SINGLEVALUE> int	ProcessSubblockGeneric ( uint32_t * & pRowID, int iSubblockIdInBlock );
 
 	bool		MoveToBlock ( int iNextBlock ) final;
 };
 
-template <bool USE_HASHES, bool HAVE_MATCHING_BLOCKS>
-Analyzer_String_T<USE_HASHES,HAVE_MATCHING_BLOCKS>::Analyzer_String_T ( const AttributeHeader_i & tHeader, FileReader_c * pReader, const Filter_t & tSettings )
+template <bool USE_HASHES, bool HAVE_MATCHING_BLOCKS, bool EQ>
+Analyzer_String_T<USE_HASHES,HAVE_MATCHING_BLOCKS,EQ>::Analyzer_String_T ( const AttributeHeader_i & tHeader, FileReader_c * pReader, const Filter_t & tSettings )
 	: ANALYZER ( tHeader.GetSettings().m_iSubblockSize )
 	, ACCESSOR ( tHeader, pReader, true )
 	, m_tBlockConst ( ANALYZER::m_tRowID )
@@ -865,8 +952,8 @@ Analyzer_String_T<USE_HASHES,HAVE_MATCHING_BLOCKS>::Analyzer_String_T ( const At
 	SetupPackingFuncs();
 }
 
-template <bool USE_HASHES, bool HAVE_MATCHING_BLOCKS>
-bool Analyzer_String_T<USE_HASHES,HAVE_MATCHING_BLOCKS>::GetNextRowIdBlock ( Span_T<uint32_t> & dRowIdBlock )
+template <bool USE_HASHES, bool HAVE_MATCHING_BLOCKS, bool EQ>
+bool Analyzer_String_T<USE_HASHES,HAVE_MATCHING_BLOCKS,EQ>::GetNextRowIdBlock ( Span_T<uint32_t> & dRowIdBlock )
 {
 	if ( ANALYZER::m_iCurSubblock>=ANALYZER::m_iTotalSubblocks )
 		return false;
@@ -897,31 +984,31 @@ bool Analyzer_String_T<USE_HASHES,HAVE_MATCHING_BLOCKS>::GetNextRowIdBlock ( Spa
 	return CheckEmptySpan ( pRowID, pRowIdStart, dRowIdBlock );
 }
 
-template <bool USE_HASHES, bool HAVE_MATCHING_BLOCKS>
-void Analyzer_String_T<USE_HASHES,HAVE_MATCHING_BLOCKS>::SetupPackingFuncs()
+template <bool USE_HASHES, bool HAVE_MATCHING_BLOCKS, bool EQ>
+void Analyzer_String_T<USE_HASHES,HAVE_MATCHING_BLOCKS,EQ>::SetupPackingFuncs()
 {
 	auto & dFuncs = m_dProcessingFuncs;
 	for ( auto & i : dFuncs )
 		i = nullptr;
 
 	// doesn't depend on filter type; just fills result with rowids
-	dFuncs [ to_underlying ( StrPacking_e::CONST ) ] = &Analyzer_String_T<USE_HASHES,HAVE_MATCHING_BLOCKS>::ProcessSubblockConst;
+	dFuncs [ to_underlying ( StrPacking_e::CONST ) ] = &Analyzer_String_T<USE_HASHES,HAVE_MATCHING_BLOCKS,EQ>::ProcessSubblockConst;
 
 	// doesn't depend on filter type too; work off pre-calculated array
-	dFuncs [ to_underlying ( StrPacking_e::TABLE ) ] = &Analyzer_String_T<USE_HASHES,HAVE_MATCHING_BLOCKS>::ProcessSubblockTable;
+	dFuncs [ to_underlying ( StrPacking_e::TABLE ) ] = &Analyzer_String_T<USE_HASHES,HAVE_MATCHING_BLOCKS,EQ>::ProcessSubblockTable;
 
 	switch ( m_tSettings.m_eType )
 	{
 	case FilterType_e::STRINGS:
-		if ( m_tSettings.m_dValues.size()==1 )
+		if ( m_tSettings.m_dStringValues.size()==1 )
 		{
-			dFuncs [ to_underlying ( StrPacking_e::CONSTLEN ) ]	= &Analyzer_String_T<USE_HASHES,HAVE_MATCHING_BLOCKS>::ProcessSubblockConstLen_SingleValue;
-			dFuncs [ to_underlying ( StrPacking_e::GENERIC ) ]	= &Analyzer_String_T<USE_HASHES,HAVE_MATCHING_BLOCKS>::ProcessSubblockGeneric_SingleValue;
+			dFuncs [ to_underlying ( StrPacking_e::CONSTLEN ) ]	= &Analyzer_String_T<USE_HASHES,HAVE_MATCHING_BLOCKS,EQ>::ProcessSubblockConstLen<true>;
+			dFuncs [ to_underlying ( StrPacking_e::GENERIC ) ]	= &Analyzer_String_T<USE_HASHES,HAVE_MATCHING_BLOCKS,EQ>::ProcessSubblockGeneric<true>;
 		}
 		else
 		{
-			dFuncs [ to_underlying ( StrPacking_e::CONSTLEN ) ]	= &Analyzer_String_T<USE_HASHES,HAVE_MATCHING_BLOCKS>::ProcessSubblockConstLen_Values;
-			dFuncs [ to_underlying ( StrPacking_e::GENERIC ) ]	= &Analyzer_String_T<USE_HASHES,HAVE_MATCHING_BLOCKS>::ProcessSubblockGeneric_Values;
+			dFuncs [ to_underlying ( StrPacking_e::CONSTLEN ) ]	= &Analyzer_String_T<USE_HASHES,HAVE_MATCHING_BLOCKS,EQ>::ProcessSubblockConstLen<false>;
+			dFuncs [ to_underlying ( StrPacking_e::GENERIC ) ]	= &Analyzer_String_T<USE_HASHES,HAVE_MATCHING_BLOCKS,EQ>::ProcessSubblockGeneric<false>;
 		}
 		break;
 
@@ -931,36 +1018,43 @@ void Analyzer_String_T<USE_HASHES,HAVE_MATCHING_BLOCKS>::SetupPackingFuncs()
 	}
 }
 
-template <bool USE_HASHES, bool HAVE_MATCHING_BLOCKS>
-int Analyzer_String_T<USE_HASHES,HAVE_MATCHING_BLOCKS>::ProcessSubblockConst ( uint32_t * & pRowID, int iSubblockIdInBlock )
+template <bool USE_HASHES, bool HAVE_MATCHING_BLOCKS, bool EQ>
+int Analyzer_String_T<USE_HASHES,HAVE_MATCHING_BLOCKS,EQ>::ProcessSubblockConst ( uint32_t * & pRowID, int iSubblockIdInBlock )
 {
 	return m_tBlockConst.ProcessSubblock ( pRowID, ACCESSOR::GetNumSubblockValues(iSubblockIdInBlock) );
 }
 
-template <bool USE_HASHES, bool HAVE_MATCHING_BLOCKS>
-int Analyzer_String_T<USE_HASHES,HAVE_MATCHING_BLOCKS>::ProcessSubblockTable ( uint32_t * & pRowID, int iSubblockIdInBlock )
+template <bool USE_HASHES, bool HAVE_MATCHING_BLOCKS, bool EQ>
+int Analyzer_String_T<USE_HASHES,HAVE_MATCHING_BLOCKS,EQ>::ProcessSubblockTable ( uint32_t * & pRowID, int iSubblockIdInBlock )
 {
 	ACCESSOR::m_tBlockTable.ReadSubblock ( iSubblockIdInBlock, StoredBlockTraits_t::GetNumSubblockValues(iSubblockIdInBlock), *ACCESSOR::m_pReader );
 	return m_tBlockTable.ProcessSubblock ( pRowID, ACCESSOR::m_tBlockTable.GetValueIndexes() );
 }
 
-template <bool USE_HASHES, bool HAVE_MATCHING_BLOCKS>
-int Analyzer_String_T<USE_HASHES,HAVE_MATCHING_BLOCKS>::ProcessSubblockConstLen_SingleValue ( uint32_t * & pRowID, int iSubblockIdInBlock )
+template <bool USE_HASHES, bool HAVE_MATCHING_BLOCKS, bool EQ>
+template <bool SINGLEVALUE>
+int Analyzer_String_T<USE_HASHES,HAVE_MATCHING_BLOCKS,EQ>::ProcessSubblockConstLen ( uint32_t * & pRowID, int iSubblockIdInBlock )
 {
-	assert ( 0 && "NIY" );
-	return 0;
+	int iNumSubblockValues = StoredBlockTraits_t::GetNumSubblockValues(iSubblockIdInBlock);
+	ACCESSOR::m_tBlockConstLen.ReadSubblock ( iSubblockIdInBlock, iNumSubblockValues, *ACCESSOR::m_pReader );
 
-//	ACCESSOR::m_tBlockConstLen.ReadSubblock ( iSubblockIdInBlock, ACCESSOR::GetNumSubblockValues(iSubblockIdInBlock), *ACCESSOR::m_pReader );
-//	return m_tBlockValues.ProcessSubblock_SingleValue ( pRowID, ACCESSOR::m_tBlockConstLen.GetAllValues() );
+	// the idea is to postpone value reading to the point when all other options (hashes, lengths) are exhausted
+	return m_tBlockValues.ProcessSubblock_Values<SINGLEVALUE> ( pRowID, ACCESSOR::m_tBlockConstLen.GetAllHashes(), ACCESSOR::m_tBlockConstLen.GetAllValueLengths(),
+		[iSubblockIdInBlock,iNumSubblockValues,this]( int iValue )
+		{
+			auto dValues = ACCESSOR::m_tBlockConstLen.ReadAllSubblockValues ( iSubblockIdInBlock, iNumSubblockValues, *ACCESSOR::m_pReader );
+			return dValues[iValue];
+		} );
 }
 
-template <bool USE_HASHES, bool HAVE_MATCHING_BLOCKS>
-int Analyzer_String_T<USE_HASHES,HAVE_MATCHING_BLOCKS>::ProcessSubblockGeneric_SingleValue ( uint32_t * & pRowID, int iSubblockIdInBlock )
+template <bool USE_HASHES, bool HAVE_MATCHING_BLOCKS, bool EQ>
+template <bool SINGLEVALUE>
+int Analyzer_String_T<USE_HASHES,HAVE_MATCHING_BLOCKS,EQ>::ProcessSubblockGeneric ( uint32_t * & pRowID, int iSubblockIdInBlock )
 {
 	ACCESSOR::m_tBlockGeneric.ReadSubblock ( iSubblockIdInBlock, StoredBlockTraits_t::GetNumSubblockValues(iSubblockIdInBlock), *m_pReader );
 
 	// the idea is to postpone value reading to the point when all other options (hashes, lengths) are exhausted
-	return m_tBlockValues.ProcessSubblock_Values ( pRowID, ACCESSOR::m_tBlockGeneric.GetAllHashes(), ACCESSOR::m_tBlockGeneric.GetAllValueLengths(),
+	return m_tBlockValues.ProcessSubblock_Values<SINGLEVALUE> ( pRowID, ACCESSOR::m_tBlockGeneric.GetAllHashes(), ACCESSOR::m_tBlockGeneric.GetAllValueLengths(),
 		[iSubblockIdInBlock,this]( int iValue )
 		{
 			auto dValues = ACCESSOR::m_tBlockGeneric.ReadAllSubblockValues ( iSubblockIdInBlock, *ACCESSOR::m_pReader );
@@ -968,32 +1062,8 @@ int Analyzer_String_T<USE_HASHES,HAVE_MATCHING_BLOCKS>::ProcessSubblockGeneric_S
 		} );
 }
 
-template <bool USE_HASHES, bool HAVE_MATCHING_BLOCKS>
-int Analyzer_String_T<USE_HASHES,HAVE_MATCHING_BLOCKS>::ProcessSubblockConstLen_Values ( uint32_t * & pRowID, int iSubblockIdInBlock )
-{
-	assert ( 0 && "NIY" );
-	return 0;
-
-	//ACCESSOR::m_tBlockConstLen.ReadSubblock ( iSubblockIdInBlock, ACCESSOR::GetNumSubblockValues(iSubblockIdInBlock),*ACCESSOR::m_pReader );
-	//return m_tBlockValues.ProcessSubblock_Values ( pRowID, ACCESSOR::m_tBlockConstLen.GetAllValues() );
-}
-
-template <bool USE_HASHES, bool HAVE_MATCHING_BLOCKS>
-int Analyzer_String_T<USE_HASHES,HAVE_MATCHING_BLOCKS>::ProcessSubblockGeneric_Values ( uint32_t * & pRowID, int iSubblockIdInBlock )
-{
-	ACCESSOR::m_tBlockGeneric.ReadSubblock ( iSubblockIdInBlock, StoredBlockTraits_t::GetNumSubblockValues(iSubblockIdInBlock), *m_pReader );
-
-	// the idea is to postpone value reading to the point when all other options (hashes, lengths) are exhausted
-	return m_tBlockValues.ProcessSubblock_Values ( pRowID, ACCESSOR::m_tBlockGeneric.GetAllHashes(), ACCESSOR::m_tBlockGeneric.GetAllValueLengths(),
-		[iSubblockIdInBlock,this]( int iValue )
-		{
-			auto dValues = ACCESSOR::m_tBlockGeneric.ReadAllSubblockValues ( iSubblockIdInBlock, *ACCESSOR::m_pReader );
-			return dValues[iValue];
-		} );
-}
-
-template <bool USE_HASHES, bool HAVE_MATCHING_BLOCKS>
-bool Analyzer_String_T<USE_HASHES,HAVE_MATCHING_BLOCKS>::MoveToBlock ( int iNextBlock )
+template <bool USE_HASHES, bool HAVE_MATCHING_BLOCKS, bool EQ>
+bool Analyzer_String_T<USE_HASHES,HAVE_MATCHING_BLOCKS,EQ>::MoveToBlock ( int iNextBlock )
 {
 	while(true)
 	{
@@ -1043,14 +1113,19 @@ Iterator_i * CreateIteratorStr ( const AttributeHeader_i & tHeader, FileReader_c
 Analyzer_i * CreateAnalyzerStr ( const AttributeHeader_i & tHeader, FileReader_c * pReader, const Filter_t & tSettings, bool bHaveMatchingBlocks )
 {
 	bool bUseHashes = tHeader.HaveStringHashes() && tSettings.m_fnCalcStrHash;
-	int iIndex = 2*( bUseHashes ? 1 : 0 ) + ( bHaveMatchingBlocks ? 1 : 0 );
+	bool bEq = !tSettings.m_bExclude;
+	int iIndex = 4*( bUseHashes ? 1 : 0 ) + 2*( bHaveMatchingBlocks ? 1 : 0 ) + ( bEq ? 1 : 0 );
 
 	switch ( iIndex )
 	{
-	case 0:	return new Analyzer_String_T<false,false> ( tHeader, pReader, tSettings );
-	case 1:	return new Analyzer_String_T<false,true>  ( tHeader, pReader, tSettings );
-	case 2: return new Analyzer_String_T<true, false> ( tHeader, pReader, tSettings );
-	case 3: return new Analyzer_String_T<true, true>  ( tHeader, pReader, tSettings );
+	case 0:	return new Analyzer_String_T<false,false,false> ( tHeader, pReader, tSettings );
+	case 1:	return new Analyzer_String_T<false,false,true>  ( tHeader, pReader, tSettings );
+	case 2:	return new Analyzer_String_T<false,true, false> ( tHeader, pReader, tSettings );
+	case 3:	return new Analyzer_String_T<false,true, true>  ( tHeader, pReader, tSettings );
+	case 4:	return new Analyzer_String_T<true, false,false> ( tHeader, pReader, tSettings );
+	case 5:	return new Analyzer_String_T<true, false,true>  ( tHeader, pReader, tSettings );
+	case 6:	return new Analyzer_String_T<true, true, false> ( tHeader, pReader, tSettings );
+	case 7:	return new Analyzer_String_T<true, true, true>  ( tHeader, pReader, tSettings );
 	default: return nullptr;
 	}
 }

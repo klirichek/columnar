@@ -338,8 +338,6 @@ void Packer_String_c::WriteHashes ( const Span_T<std::string> & dStrings, WRITER
 
 void Packer_String_c::WritePacked_Generic()
 {
-	// internal arrangement: [packed_length0]...[packed_lengthN][data0]...[dataN]
-
 	int iSubblockSize = m_tHeader.GetSettings().m_iSubblockSize;
 	int iBlocks = ( (int)m_dCollected.size() + iSubblockSize - 1 ) / iSubblockSize;
 
@@ -358,11 +356,10 @@ void Packer_String_c::WritePacked_Generic()
 
 		// write lengths
 		m_dTmpLengths.resize(iBlockValues);
-		m_dTmpLengths[0] = m_dCollected[iBlockStart].size();
-		for ( int i = 1; i<iBlockValues; i++ )
-			m_dTmpLengths[i] = m_dTmpLengths[i-1] + m_dCollected[iBlockStart+i].size();
+		for ( int i = 0; i<iBlockValues; i++ )
+			m_dTmpLengths[i] = m_dCollected[iBlockStart+i].size();
 
-		WriteValues_Delta_PFOR ( Span_T<uint64_t>(m_dTmpLengths), m_dUncompressed, m_dCompressed, tMemWriter, m_pCodec.get() );
+		WriteValues_PFOR ( Span_T<uint64_t>(m_dTmpLengths), m_dUncompressed, m_dCompressed, tMemWriter, m_pCodec.get(), true );
 
 		// write bodies
 		for ( int i = 0; i<iBlockValues; i++ )
