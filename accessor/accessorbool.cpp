@@ -99,6 +99,8 @@ class Accessor_Bool_c : public StoredBlockTraits_t
 public:
 						Accessor_Bool_c ( const AttributeHeader_i & tHeader, FileReader_c * pReader );
 
+	FORCE_INLINE void	SetCurBlock ( uint32_t uBlockId );
+
 protected:
 	const AttributeHeader_i &		m_tHeader;
 	std::unique_ptr<FileReader_c>	m_pReader;
@@ -109,8 +111,6 @@ protected:
 	int64_t (Accessor_Bool_c::*m_fnReadValue)() = nullptr;
 
 	BoolPacking_e		m_ePacking = BoolPacking_e::CONST;
-
-	FORCE_INLINE void	SetCurBlock ( uint32_t uBlockId );
 
 	int64_t			ReadValue_Const();
 	int64_t			ReadValue_Bitmap();
@@ -405,33 +405,7 @@ int Analyzer_Bool_T<HAVE_MATCHING_BLOCKS>::ProcessSubblockBitmap ( uint32_t * & 
 template <bool HAVE_MATCHING_BLOCKS>
 bool Analyzer_Bool_T<HAVE_MATCHING_BLOCKS>::GetNextRowIdBlock ( Span_T<uint32_t> & dRowIdBlock )
 {
-	if ( ANALYZER::m_iCurSubblock>=ANALYZER::m_iTotalSubblocks )
-		return false;
-
-	uint32_t * pRowIdStart = ANALYZER::m_dCollected.data();
-	uint32_t * pRowID = pRowIdStart;
-	uint32_t * pRowIdMax = pRowIdStart + m_iSubblockSize;
-
-	// we scan until we find at least 128 (subblock size) matches.
-	// this might lead to this analyzer scanning the whole index
-	// a more responsive version would return after processing each 128 docs
-	// (even if it doesn't find any matches)
-	while ( pRowID<pRowIdMax )
-	{
-		int iSubblockIdInBlock;
-		if ( HAVE_MATCHING_BLOCKS )
-			iSubblockIdInBlock = ACCESSOR::GetSubblockIdInBlock ( ANALYZER::m_pMatchingSubblocks->GetBlock ( ANALYZER::m_iCurSubblock ) );
-		else
-			iSubblockIdInBlock = ACCESSOR::GetSubblockIdInBlock ( ANALYZER::m_iCurSubblock );
-
-		assert(m_fnProcessSubblock);
-		ANALYZER::m_iNumProcessed += (*this.*m_fnProcessSubblock) ( pRowID, iSubblockIdInBlock );
-
-		if ( !ANALYZER::MoveToSubblock ( ANALYZER::m_iCurSubblock+1 ) )
-			break;
-	}
-
-	return CheckEmptySpan ( pRowID, pRowIdStart, dRowIdBlock );
+	return ANALYZER::GetNextRowIdBlock ( (ACCESSOR&)*this, dRowIdBlock, [this] ( uint32_t * & pRowID, int iSubblockIdInBlock ){ return (*this.*m_fnProcessSubblock) ( pRowID, iSubblockIdInBlock ); } );
 }
 
 template <bool HAVE_MATCHING_BLOCKS>
@@ -439,8 +413,7 @@ bool Analyzer_Bool_T<HAVE_MATCHING_BLOCKS>::MoveToBlock ( int iNextBlock )
 {
 	while(true)
 	{
-		ANALYZER::m_iCurBlockId = iNextBlock;
-		ACCESSOR::SetCurBlock ( ANALYZER::m_iCurBlockId );
+		StartBlockProcessing ( (ACCESSOR&)*this, iNextBlock );
 
 		if ( m_bAcceptFalse && m_bAcceptTrue )
 			break;
@@ -454,15 +427,7 @@ bool Analyzer_Bool_T<HAVE_MATCHING_BLOCKS>::MoveToBlock ( int iNextBlock )
 		if ( m_tBlockConst.SetupNextBlock ( ACCESSOR::m_tBlockConst ) )
 			break;
 
-		while ( iNextBlock==ANALYZER::m_iCurBlockId && ANALYZER::m_iCurSubblock<ANALYZER::m_iTotalSubblocks )
-		{
-			if ( HAVE_MATCHING_BLOCKS )
-				iNextBlock = ACCESSOR::SubblockId2BlockId ( ANALYZER::m_pMatchingSubblocks->GetBlock ( ANALYZER::m_iCurSubblock++ ) );
-			else
-				iNextBlock = ACCESSOR::SubblockId2BlockId ( ANALYZER::m_iCurSubblock++ );
-		}
-
-		if ( ANALYZER::m_iCurSubblock>=ANALYZER::m_iTotalSubblocks )
+		if ( !RewindToNextBlock ( (ACCESSOR&)*this, iNextBlock ) )
 			return false;
 	}
 

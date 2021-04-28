@@ -490,7 +490,9 @@ class Accessor_MVA_T : public StoredBlockTraits_t
 	using BASE = StoredBlockTraits_t;
 
 public:
-			Accessor_MVA_T ( const AttributeHeader_i & tHeader, FileReader_c * pReader );
+									Accessor_MVA_T ( const AttributeHeader_i & tHeader, FileReader_c * pReader );
+
+	FORCE_INLINE void				SetCurBlock ( uint32_t uBlockId );
 
 protected:
 	const AttributeHeader_i &		m_tHeader;
@@ -508,8 +510,6 @@ protected:
 
 	uint8_t *						m_pResult = nullptr;
 	size_t							m_tValueLength = 0;
-
-	FORCE_INLINE void				SetCurBlock ( uint32_t uBlockId );
 
 	template <bool PACK> void		ReadValue_Const();
 	template <bool PACK> void		ReadValue_ConstLen();
@@ -956,33 +956,7 @@ Analyzer_MVA_T<T,T_COMP,FUNC,HAVE_MATCHING_BLOCKS>::Analyzer_MVA_T ( const Attri
 template <typename T, typename T_COMP, typename FUNC, bool HAVE_MATCHING_BLOCKS>
 bool Analyzer_MVA_T<T,T_COMP,FUNC,HAVE_MATCHING_BLOCKS>::GetNextRowIdBlock ( Span_T<uint32_t> & dRowIdBlock )
 {
-	if ( ANALYZER::m_iCurSubblock>=ANALYZER::m_iTotalSubblocks )
-		return false;
-
-	uint32_t * pRowIdStart = ANALYZER::m_dCollected.data();
-	uint32_t * pRowID = pRowIdStart;
-	uint32_t * pRowIdMax = pRowIdStart + ACCESSOR::m_iSubblockSize;
-
-	// we scan until we find at least 128 (subblock size) matches.
-	// this might lead to this analyzer scanning the whole index
-	// a more responsive version would return after processing each 128 docs
-	// (even if it doesn't find any matches)
-	while ( pRowID<pRowIdMax )
-	{
-		int iSubblockIdInBlock;
-		if ( HAVE_MATCHING_BLOCKS )
-			iSubblockIdInBlock = ACCESSOR::GetSubblockIdInBlock ( ANALYZER::m_pMatchingSubblocks->GetBlock ( ANALYZER::m_iCurSubblock ) );
-		else
-			iSubblockIdInBlock = ACCESSOR::GetSubblockIdInBlock ( ANALYZER::m_iCurSubblock );
-
-		assert(m_fnProcessSubblock);
-		ANALYZER::m_iNumProcessed += (*this.*m_fnProcessSubblock) ( pRowID, iSubblockIdInBlock );
-
-		if ( !ANALYZER::MoveToSubblock ( ANALYZER::m_iCurSubblock+1 ) )
-			break;
-	}
-
-	return CheckEmptySpan ( pRowID, pRowIdStart, dRowIdBlock );
+	return ANALYZER::GetNextRowIdBlock ( (ACCESSOR&)*this, dRowIdBlock, [this] ( uint32_t * & pRowID, int iSubblockIdInBlock ){ return (*this.*m_fnProcessSubblock) ( pRowID, iSubblockIdInBlock ); } );
 }
 
 template <typename T, typename T_COMP, typename FUNC, bool HAVE_MATCHING_BLOCKS>
@@ -1084,8 +1058,7 @@ bool Analyzer_MVA_T<T,T_COMP,FUNC,HAVE_MATCHING_BLOCKS>::MoveToBlock ( int iNext
 {
 	while(true)
 	{
-		ANALYZER::m_iCurBlockId = iNextBlock;
-		ACCESSOR::SetCurBlock ( ANALYZER::m_iCurBlockId );
+		StartBlockProcessing ( (ACCESSOR&)*this, iNextBlock );
 
 		if ( ACCESSOR::m_ePacking!=MvaPacking_e::CONST && ACCESSOR::m_ePacking!=MvaPacking_e::TABLE )
 			break;
@@ -1101,15 +1074,7 @@ bool Analyzer_MVA_T<T,T_COMP,FUNC,HAVE_MATCHING_BLOCKS>::MoveToBlock ( int iNext
 				break;
 		}
 
-		while ( iNextBlock==ANALYZER::m_iCurBlockId && ANALYZER::m_iCurSubblock<ANALYZER::m_iTotalSubblocks )
-		{
-			if ( HAVE_MATCHING_BLOCKS )
-				iNextBlock = ACCESSOR::SubblockId2BlockId ( ANALYZER::m_pMatchingSubblocks->GetBlock ( ANALYZER::m_iCurSubblock++ ) );
-			else
-				iNextBlock = ACCESSOR::SubblockId2BlockId ( ANALYZER::m_iCurSubblock++ );
-		}
-
-		if ( ANALYZER::m_iCurSubblock>=ANALYZER::m_iTotalSubblocks )
+		if ( !RewindToNextBlock ( (ACCESSOR&)*this, iNextBlock ) )
 			return false;
 	}
 

@@ -323,18 +323,27 @@ StoredBlock_StrTable_c::StoredBlock_StrTable_c ( const std::string & sCodec32, c
 void StoredBlock_StrTable_c::ReadHeader ( FileReader_c & tReader, int iValues, bool bHaveHashes, bool bNeedHashes )
 {
 	m_dTableValues.resize ( tReader.Read_uint8() );
-
 	if ( bHaveHashes )
 		ReadHashes ( tReader, (int)m_dTableValues.size(), bNeedHashes ); // read or skip hashes depending on bNeedHashes
 
-	uint32_t uTotalSize = tReader.Unpack_uint32();
-	DecodeValues_Delta_PFOR ( m_dTableValueLengths, tReader, *m_pCodec, m_dTmp, uTotalSize, false );
+	uint64_t uTotalSizeOfValues = tReader.Unpack_uint64();
+	uint32_t uTotalSizeOfLengths = tReader.Unpack_uint32();
 
-	for ( size_t i = 0; i < m_dTableValues.size(); i++ )
+	// we read either hashes or lengths+values, but not both at the same time
+	if ( !(bHaveHashes && bNeedHashes) )
 	{
-		auto & tValue = m_dTableValues[i];
-		tValue.resize ( m_dTableValueLengths[i] );
-		tReader.Read ( tValue.data(), tValue.size() );
+		DecodeValues_Delta_PFOR ( m_dTableValueLengths, tReader, *m_pCodec, m_dTmp, uTotalSizeOfLengths, false );
+		for ( size_t i = 0; i < m_dTableValues.size(); i++ )
+		{
+			auto & tValue = m_dTableValues[i];
+			tValue.resize ( m_dTableValueLengths[i] );
+			tReader.Read ( tValue.data(), tValue.size() );
+		}
+	}
+	else
+	{
+		tReader.Seek ( tReader.GetPos() + uTotalSizeOfLengths + uTotalSizeOfValues );	// skip lengths and values
+		m_dTableValueLengths.resize(iValues);
 	}
 
 	m_iBits = CalcNumBits ( m_dTableValues.size() );
@@ -523,6 +532,8 @@ class Accessor_String_c : public StoredBlockTraits_t
 public:
 									Accessor_String_c ( const AttributeHeader_i & tHeader, FileReader_c * pReader, bool bNeedHashes );
 
+	FORCE_INLINE void				SetCurBlock ( uint32_t uBlockId );
+
 protected:
 	const AttributeHeader_i &		m_tHeader;
 	std::unique_ptr<FileReader_c>	m_pReader;
@@ -541,8 +552,6 @@ protected:
 	void (Accessor_String_c::*m_fnReadValuePacked)() = nullptr;
 	int (Accessor_String_c::*m_fnGetValueLength)() = nullptr;
 	uint64_t (Accessor_String_c::*m_fnGetHash)() = nullptr;
-
-	inline void	SetCurBlock ( uint32_t uBlockId );
 
 	template <bool PACK> void ReadValue_Const()		{ m_tResult = m_tBlockConst.GetValue<PACK>(); }
 	int			GetValueLen_Const()					{ return m_tBlockConst.GetValueLength(); }
@@ -958,33 +967,7 @@ Analyzer_String_T<USE_HASHES,HAVE_MATCHING_BLOCKS,EQ>::Analyzer_String_T ( const
 template <bool USE_HASHES, bool HAVE_MATCHING_BLOCKS, bool EQ>
 bool Analyzer_String_T<USE_HASHES,HAVE_MATCHING_BLOCKS,EQ>::GetNextRowIdBlock ( Span_T<uint32_t> & dRowIdBlock )
 {
-	if ( ANALYZER::m_iCurSubblock>=ANALYZER::m_iTotalSubblocks )
-		return false;
-
-	uint32_t * pRowIdStart = ANALYZER::m_dCollected.data();
-	uint32_t * pRowID = pRowIdStart;
-	uint32_t * pRowIdMax = pRowIdStart + ACCESSOR::m_iSubblockSize;
-
-	// we scan until we find at least 128 (subblock size) matches.
-	// this might lead to this analyzer scanning the whole index
-	// a more responsive version would return after processing each 128 docs
-	// (even if it doesn't find any matches)
-	while ( pRowID<pRowIdMax )
-	{
-		int iSubblockIdInBlock;
-		if ( HAVE_MATCHING_BLOCKS )
-			iSubblockIdInBlock = ACCESSOR::GetSubblockIdInBlock ( ANALYZER::m_pMatchingSubblocks->GetBlock ( ANALYZER::m_iCurSubblock ) );
-		else
-			iSubblockIdInBlock = ACCESSOR::GetSubblockIdInBlock ( ANALYZER::m_iCurSubblock );
-
-		assert(m_fnProcessSubblock);
-		ANALYZER::m_iNumProcessed += (*this.*m_fnProcessSubblock) ( pRowID, iSubblockIdInBlock );
-
-		if ( !ANALYZER::MoveToSubblock ( ANALYZER::m_iCurSubblock+1 ) )
-			break;
-	}
-
-	return CheckEmptySpan ( pRowID, pRowIdStart, dRowIdBlock );
+	return ANALYZER::GetNextRowIdBlock ( (ACCESSOR&)*this, dRowIdBlock, [this] ( uint32_t * & pRowID, int iSubblockIdInBlock ){ return (*this.*m_fnProcessSubblock) ( pRowID, iSubblockIdInBlock ); } );
 }
 
 template <bool USE_HASHES, bool HAVE_MATCHING_BLOCKS, bool EQ>
@@ -1070,8 +1053,7 @@ bool Analyzer_String_T<USE_HASHES,HAVE_MATCHING_BLOCKS,EQ>::MoveToBlock ( int iN
 {
 	while(true)
 	{
-		ANALYZER::m_iCurBlockId = iNextBlock;
-		ACCESSOR::SetCurBlock ( ANALYZER::m_iCurBlockId );
+		StartBlockProcessing ( (ACCESSOR&)*this, iNextBlock );
 
 		if ( ACCESSOR::m_ePacking!=StrPacking_e::CONST && ACCESSOR::m_ePacking!=StrPacking_e::TABLE )
 			break;
@@ -1087,15 +1069,7 @@ bool Analyzer_String_T<USE_HASHES,HAVE_MATCHING_BLOCKS,EQ>::MoveToBlock ( int iN
 				break;
 		}
 
-		while ( iNextBlock==ANALYZER::m_iCurBlockId && ANALYZER::m_iCurSubblock<ANALYZER::m_iTotalSubblocks )
-		{
-			if ( HAVE_MATCHING_BLOCKS )
-				iNextBlock = ACCESSOR::SubblockId2BlockId ( ANALYZER::m_pMatchingSubblocks->GetBlock ( ANALYZER::m_iCurSubblock++ ) );
-			else
-				iNextBlock = ACCESSOR::SubblockId2BlockId ( ANALYZER::m_iCurSubblock++ );
-		}
-
-		if ( ANALYZER::m_iCurSubblock>=ANALYZER::m_iTotalSubblocks )
+		if ( !RewindToNextBlock ( (ACCESSOR&)*this, iNextBlock ) )
 			return false;
 	}
 

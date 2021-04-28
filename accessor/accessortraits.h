@@ -132,6 +132,15 @@ protected:
 
 	FORCE_INLINE bool	MoveToSubblock ( int iSubblock );
 	virtual bool		MoveToBlock ( int iBlock ) = 0;
+
+	template <typename ACCESSOR, typename PROCESSSUBBLOCK>
+	FORCE_INLINE bool	GetNextRowIdBlock ( ACCESSOR & tAccessor, Span_T<uint32_t> & dRowIdBlock, PROCESSSUBBLOCK && fnProcessSubblock );
+
+	template <typename ACCESSOR>
+	FORCE_INLINE void	StartBlockProcessing ( ACCESSOR & tAccessor, int iNextBlock );
+
+	template <typename ACCESSOR>
+	FORCE_INLINE bool	RewindToNextBlock ( ACCESSOR & tAccessor, int & iNextBlock );
 };
 
 template <bool HAVE_MATCHING_BLOCKS>
@@ -218,6 +227,61 @@ bool Analyzer_T<HAVE_MATCHING_BLOCKS>::HintRowID ( uint32_t tRowID )
 	}
 
 	return false;
+}
+
+template <bool HAVE_MATCHING_BLOCKS>
+template <typename ACCESSOR, typename PROCESSSUBBLOCK>
+bool Analyzer_T<HAVE_MATCHING_BLOCKS>::GetNextRowIdBlock ( ACCESSOR & tAccessor, Span_T<uint32_t> & dRowIdBlock, PROCESSSUBBLOCK && fnProcessSubblock )
+{
+	if ( m_iCurSubblock>=m_iTotalSubblocks )
+		return false;
+
+	uint32_t * pRowIdStart = m_dCollected.data();
+	uint32_t * pRowID = pRowIdStart;
+	uint32_t * pRowIdMax = pRowIdStart + tAccessor.m_iSubblockSize;
+
+	// we scan until we find at least 128 (subblock size) matches.
+	// this might lead to this analyzer scanning the whole index
+	// a more responsive version would return after processing each 128 docs
+	// (even if it doesn't find any matches)
+	while ( pRowID<pRowIdMax )
+	{
+		int iSubblockIdInBlock;
+		if ( HAVE_MATCHING_BLOCKS )
+			iSubblockIdInBlock = tAccessor.GetSubblockIdInBlock ( m_pMatchingSubblocks->GetBlock(m_iCurSubblock) );
+		else
+			iSubblockIdInBlock = tAccessor.GetSubblockIdInBlock ( m_iCurSubblock );
+
+		m_iNumProcessed += fnProcessSubblock ( pRowID, iSubblockIdInBlock );
+
+		if ( !MoveToSubblock ( m_iCurSubblock+1 ) )
+			break;
+	}
+
+	return CheckEmptySpan ( pRowID, pRowIdStart, dRowIdBlock );
+}
+
+template <bool HAVE_MATCHING_BLOCKS>
+template <typename ACCESSOR>
+void Analyzer_T<HAVE_MATCHING_BLOCKS>::StartBlockProcessing ( ACCESSOR & tAccessor, int iNextBlock )
+{
+	m_iCurBlockId = iNextBlock;
+	tAccessor.SetCurBlock ( m_iCurBlockId );
+}
+
+template <bool HAVE_MATCHING_BLOCKS>
+template <typename ACCESSOR>
+bool Analyzer_T<HAVE_MATCHING_BLOCKS>::RewindToNextBlock ( ACCESSOR & tAccessor, int & iNextBlock )
+{
+	while ( iNextBlock==m_iCurBlockId && m_iCurSubblock<m_iTotalSubblocks )
+	{
+		if ( HAVE_MATCHING_BLOCKS )
+			iNextBlock = tAccessor.SubblockId2BlockId ( m_pMatchingSubblocks->GetBlock ( m_iCurSubblock++ ) );
+		else
+			iNextBlock = tAccessor.SubblockId2BlockId ( m_iCurSubblock++ );
+	}
+
+	return m_iCurSubblock<m_iTotalSubblocks;
 }
 
 
