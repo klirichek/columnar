@@ -413,7 +413,7 @@ bool Analyzer_Bool_T<HAVE_MATCHING_BLOCKS>::MoveToBlock ( int iNextBlock )
 {
 	while(true)
 	{
-		StartBlockProcessing ( (ACCESSOR&)*this, iNextBlock );
+		ANALYZER::StartBlockProcessing ( (ACCESSOR&)*this, iNextBlock );
 
 		if ( m_bAcceptFalse && m_bAcceptTrue )
 			break;
@@ -427,7 +427,7 @@ bool Analyzer_Bool_T<HAVE_MATCHING_BLOCKS>::MoveToBlock ( int iNextBlock )
 		if ( m_tBlockConst.SetupNextBlock ( ACCESSOR::m_tBlockConst ) )
 			break;
 
-		if ( !RewindToNextBlock ( (ACCESSOR&)*this, iNextBlock ) )
+		if ( !ANALYZER::RewindToNextBlock ( (ACCESSOR&)*this, iNextBlock ) )
 			return false;
 	}
 

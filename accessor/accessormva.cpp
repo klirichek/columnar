@@ -1058,7 +1058,7 @@ bool Analyzer_MVA_T<T,T_COMP,FUNC,HAVE_MATCHING_BLOCKS>::MoveToBlock ( int iNext
 {
 	while(true)
 	{
-		StartBlockProcessing ( (ACCESSOR&)*this, iNextBlock );
+		ANALYZER::StartBlockProcessing ( (ACCESSOR&)*this, iNextBlock );
 
 		if ( ACCESSOR::m_ePacking!=MvaPacking_e::CONST && ACCESSOR::m_ePacking!=MvaPacking_e::TABLE )
 			break;
@@ -1074,7 +1074,7 @@ bool Analyzer_MVA_T<T,T_COMP,FUNC,HAVE_MATCHING_BLOCKS>::MoveToBlock ( int iNext
 				break;
 		}
 
-		if ( !RewindToNextBlock ( (ACCESSOR&)*this, iNextBlock ) )
+		if ( !ANALYZER::RewindToNextBlock ( (ACCESSOR&)*this, iNextBlock ) )
 			return false;
 	}
 

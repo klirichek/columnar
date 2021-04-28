@@ -1053,7 +1053,7 @@ bool Analyzer_String_T<USE_HASHES,HAVE_MATCHING_BLOCKS,EQ>::MoveToBlock ( int iN
 {
 	while(true)
 	{
-		StartBlockProcessing ( (ACCESSOR&)*this, iNextBlock );
+		ANALYZER::StartBlockProcessing ( (ACCESSOR&)*this, iNextBlock );
 
 		if ( ACCESSOR::m_ePacking!=StrPacking_e::CONST && ACCESSOR::m_ePacking!=StrPacking_e::TABLE )
 			break;
@@ -1069,7 +1069,7 @@ bool Analyzer_String_T<USE_HASHES,HAVE_MATCHING_BLOCKS,EQ>::MoveToBlock ( int iN
 				break;
 		}
 
-		if ( !RewindToNextBlock ( (ACCESSOR&)*this, iNextBlock ) )
+		if ( !ANALYZER::RewindToNextBlock ( (ACCESSOR&)*this, iNextBlock ) )
 			return false;
 	}
 
