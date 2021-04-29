@@ -16,6 +16,7 @@
 
 #include "builderstr.h"
 #include "buildertraits.h"
+#include "builderminmax.h"
 
 #include "memory"
 #include <unordered_map>
@@ -27,9 +28,12 @@ namespace columnar
 class AttributeHeaderBuilder_String_c : public AttributeHeaderBuilder_c
 {
 	using BASE = AttributeHeaderBuilder_c;
-	using BASE::BASE;
 
 public:
+	MinMaxBuilder_T<uint32_t> m_tMinMax;
+
+			AttributeHeaderBuilder_String_c ( const Settings_t & tSettings, const std::string & sName, AttrType_e eType );
+
 	bool	Save ( FileWriter_c & tWriter, int64_t & tBaseOffset, std::string & sError );
 	void	SetHashFlag ( bool bSet ) { m_bHaveHashes = bSet; }
 	bool	HaveStringHashes() const { return m_bHaveHashes; }
@@ -39,9 +43,18 @@ protected:
 };
 
 
+AttributeHeaderBuilder_String_c::AttributeHeaderBuilder_String_c ( const Settings_t & tSettings, const std::string & sName, AttrType_e eType )
+	: BASE ( tSettings, sName, eType )
+	, m_tMinMax ( tSettings )
+{}
+
+
 bool AttributeHeaderBuilder_String_c::Save ( FileWriter_c & tWriter, int64_t & tBaseOffset, std::string & sError )
 {
 	if ( !BASE::Save ( tWriter, tBaseOffset, sError ) )
+		return false;
+
+	if ( !m_tMinMax.Save ( tWriter, sError ) )
 		return false;
 
 	tWriter.Write_uint8 ( m_bHaveHashes ? 1 : 0 );
@@ -171,6 +184,8 @@ void Packer_String_c::AnalyzeCollected ( const uint8_t * pData, int iLength )
 			m_iUniques++;
 		}
 	}
+
+	m_tHeader.m_tMinMax.Add(iLength);
 }
 
 
