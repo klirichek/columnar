@@ -4,4 +4,4 @@
 
 message ( STATUS "Will create RPM for generic RedHat/Centos" )
 include ( builds/CommonRpm )
-LIST ( APPEND PKGSUFFIXES "rhel" )
+set ( CPACK_SUFFIX "rhel" )

@@ -14,110 +14,65 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-cmake_minimum_required ( VERSION 2.8 )
-include("CMakePrintHelpers")
+cmake_minimum_required ( VERSION 3.17 )
 
-# Set a default build type if none was specified
-set(default_build_type "RelWithDebInfo")
+# 0091 is for setting msvc runtime library via property
+FOREACH (policy CMP0091)
+	IF (POLICY ${policy})
+		CMAKE_POLICY ( SET ${policy} NEW )
+	ENDIF ()
+ENDFOREACH ()
 
-if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
-  message(STATUS "Setting build type to '${default_build_type}' as none was specified.")
-  set(CMAKE_BUILD_TYPE "${default_build_type}" CACHE
-      STRING "Choose the type of build." FORCE)
-  # Set the possible values of build type for cmake-gui
-  set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS
-    "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
-endif()
-
-project ( columnar )
-SET ( columnar_CMAKE_DIR "${columnar_SOURCE_DIR}/cmake" )
+project ( columnar VERSION 1.0.0 )
+SET ( CMAKE_CXX_STANDARD 14 )
 SET ( CMAKE_MODULE_PATH "${columnar_SOURCE_DIR}/cmake" )
 
-# getting library version from version.h.in
-include( GetVersion )
-get_library_version( VERSION_STR "${CMAKE_CURRENT_SOURCE_DIR}/util/version.h.in" )
+# helpers vars to shorten generate lines
+set ( GNUCXX "$<COMPILE_LANG_AND_ID:CXX,Clang,AppleClang,GNU>" )
+set ( GNUC "$<COMPILE_LANG_AND_ID:C,Clang,AppleClang,GNU>" )
+set ( GNUC_CXX "$<OR:${GNUCXX},${GNUC}>" )
 
-set ( GCC_OR_CLANG 0 )
-if ( CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID MATCHES "Clang" )
-	set ( GCC_OR_CLANG 1 )
-endif()
+# main interface to collect all includes/links/dependencies
+add_library ( columnar_root INTERFACE )
 
-# override default /MD
-if ( MSVC )
-	set ( CMAKE_CXX_FLAGS_DEBUG_INIT "/D_DEBUG /MTd /Zi /Ob0 /Od /RTC1 /GR-" )
-	set ( CMAKE_CXX_FLAGS_MINSIZEREL_INIT "/MT /O1 /Ob1 /D NDEBUG /GR-" )
-	set ( CMAKE_CXX_FLAGS_RELEASE_INIT "/MT /O2 /Ob2 /D NDEBUG /GR-" )
-	set ( CMAKE_CXX_FLAGS_RELWITHDEBINFO_INIT "/MT /Zi /O2 /Ob2 /D NDEBUG /GR-" )
-	set ( CMAKE_CXX_STANDARD_LIBRARIES_INIT "kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib" )
-elseif ( GCC_OR_CLANG )
-	add_definitions ( "-D_FILE_OFFSET_BITS=64" )
-endif()
+# options for clang/gcc c and c++
+target_compile_options ( columnar_root INTERFACE $<${GNUC_CXX}:-D_FILE_OFFSET_BITS=64> )
+# no rtti
+target_compile_options ( columnar_root INTERFACE $<${GNUCXX}:-fno-rtti> $<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/GR->)
+target_include_directories ( columnar_root INTERFACE ${CMAKE_CURRENT_SOURCE_DIR} accessor builder util )
 
-if (DEFINED ENV{LIBS_BUNDLE})
-	set(LIBS_BUNDLE "$ENV{LIBS_BUNDLE}")
-endif()
+add_library ( columnar MODULE columnar.cpp builder.cpp columnar.h builder.h )
+add_library ( columnar::columnar ALIAS columnar )
 
-if ( NOT LIBS_BUNDLE )
-	get_filename_component(LIBS_BUNDLE "${CMAKE_CURRENT_SOURCE_DIR}/../bundle" ABSOLUTE)
-endif ()
-
-if (NOT IS_ABSOLUTE ${LIBS_BUNDLE})
-	set(LIBS_BUNDLE "${CMAKE_CURRENT_BINARY_DIR}/${LIBS_BUNDLE}")
-endif ()
-
-
-include ( CheckFunctionExists )
-string ( TOUPPER "${it}" _it )
-check_function_exists ( "pread" "HAVE_PREAD" )
-message ( STATUS "Generating config.h file" )
-configure_file ( "${CMAKE_CURRENT_SOURCE_DIR}/config_cmake.h.in" "${CMAKE_CURRENT_BINARY_DIR}/config/config.h" ESCAPE_QUOTES )
-include_directories ( "${CMAKE_CURRENT_BINARY_DIR}/config" )
-
-
-set ( ACCESSOR_H accessor/attributeheader.h accessor/accessor.h accessor/accessorbool.h accessor/accessorint.h accessor/accessormva.h
-	accessor/accessorstr.h accessor/accessortraits.h )
-
-set ( ACCESSOR_SRC accessor/attributeheader.cpp accessor/accessor.cpp accessor/accessorbool.cpp accessor/accessorint.cpp accessor/accessormva.cpp
-	accessor/accessorstr.cpp accessor/accessortraits.cpp )
-
-set ( BUILDER_H builder/builderbool.h builder/builderint.h builder/builderminmax.h builder/buildermva.h builder/builderstr.h builder/buildertraits.h )
-set ( BUILDER_SRC builder/builderbool.cpp builder/builderint.cpp builder/buildermva.cpp builder/builderstr.cpp builder/buildertraits.cpp )
-
-set ( UTIL_H util/util.h util/interval.h util/reader.h util/delta.h )
-set ( UTIL_SRC util/util.cpp util/reader.cpp util/version.cpp util/delta.cpp )
-
-set ( COMMON_H columnar.h builder.h )
-set ( COMMON_SRC columnar.cpp builder.cpp )
-
-set ( ALL_HEADERS ${ACCESSOR_H} ${BUILDER_H} ${COMMON_H} ${UTIL_H} )
-set ( ALL_SOURCES ${ACCESSOR_SRC} ${BUILDER_SRC} ${COMMON_SRC} ${UTIL_SRC} )
-
-SET ( CMAKE_CXX_STANDARD 14 )
-
-if(NOT DEFINED CMAKE_INSTALL_LIBDIR)
-        set(CMAKE_INSTALL_LIBDIR lib)
-endif(NOT DEFINED CMAKE_INSTALL_LIBDIR)
-
-add_library ( columnar SHARED ${ALL_SOURCES} ${ALL_HEADERS} ${COMMON_SRC} )
-if (WIN32)
-	set_target_properties( columnar PROPERTIES OUTPUT_NAME lib_manticore_columnar VERSION "${VERSION_STR}" SOVERSION 1 )
-else()
-	set_target_properties( columnar PROPERTIES OUTPUT_NAME _manticore_columnar VERSION "${VERSION_STR}" SOVERSION 1 )
-endif()
-
-target_include_directories ( columnar PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} )
-target_include_directories ( columnar PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/util )
-target_include_directories ( columnar PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/accessor )
-target_include_directories ( columnar PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/builder )
+target_compile_options ( columnar PRIVATE $<$<COMPILE_LANG_AND_ID:CXX,MSVC>:-D_CRT_SECURE_NO_WARNINGS -wd4996> )
 
 if (WIN32)
-	target_compile_options ( columnar PRIVATE "-wd4996" )
-endif()
+	set_target_properties ( columnar PROPERTIES OUTPUT_NAME lib_manticore_columnar )
+else ()
+	set_target_properties ( columnar PROPERTIES OUTPUT_NAME _manticore_columnar )
+endif ()
 
-SET ( EXTRA_LIBRARIES )
-include ( ${CMAKE_CURRENT_SOURCE_DIR}/GetFastPFOR.cmake )
+include ( GetFastPFOR )
+target_link_libraries ( columnar PRIVATE columnar_root )
 
-target_link_libraries ( columnar ${EXTRA_LIBRARIES} )
+add_subdirectory ( util )
+target_link_libraries ( columnar PRIVATE util )
+
+add_subdirectory ( builder )
+target_link_libraries ( columnar PRIVATE builder )
+
+add_subdirectory ( accessor )
+target_link_libraries ( columnar PRIVATE accessor )
+
+set_property ( TARGET columnar PROPERTY POSITION_INDEPENDENT_CODE TRUE )
+set_property ( TARGET util PROPERTY POSITION_INDEPENDENT_CODE TRUE )
+set_property ( TARGET builder PROPERTY POSITION_INDEPENDENT_CODE TRUE )
+set_property ( TARGET accessor PROPERTY POSITION_INDEPENDENT_CODE TRUE )
+
+set_property ( TARGET columnar PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" )
+set_property ( TARGET util PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" )
+set_property ( TARGET builder PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" )
+set_property ( TARGET accessor PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" )
 
 if (DEFINED DEBUG_COLUMNAR_DEST)
 	add_custom_command ( TARGET columnar POST_BUILD	COMMAND ${CMAKE_COMMAND} -E rm -f "${DEBUG_COLUMNAR_DEST}/$<TARGET_FILE_NAME:columnar>" )
@@ -128,15 +83,39 @@ if (DEFINED DEBUG_COLUMNAR_DEST)
 	endif ()
 endif ()
 
+add_custom_target (
+		columnarpackver
+		COMMAND ${CMAKE_COMMAND}
+		-D SOURCE_DIR=${columnar_SOURCE_DIR}
+		-D BINARY_DIR=${columnar_BINARY_DIR}
+		-D BUILD_TAG=${BUILD_TAG}
+		-D DISTR_SUFFIX=${DISTR_SUFFIX}
+		-D PACKAGE_NAME=${PACKAGE_NAME}
+		-D CPACK_SUFFIX=${CPACK_SUFFIX}
+		-D VERSION_STR=${CMAKE_PROJECT_VERSION}
+		-D CMAKE_MODULE_PATH=${CMAKE_MODULE_PATH}
+		-D SRC=${columnar_SOURCE_DIR}/cmake/CPackOptions.cmake.in
+		-D DST=${columnar_BINARY_DIR}/config/CPackOptions.cmake
+		-P ${columnar_SOURCE_DIR}/packversion.cmake
+		VERBATIM
+		COMMENT "Assign package version data"
+		BYPRODUCTS ${columnar_BINARY_DIR}/config/CPackOptions.cmake
+		SOURCES ${columnar_SOURCE_DIR}/cmake/CPackOptions.cmake.in
+		DEPENDS ${columnar_SOURCE_DIR}/cmake/CPackOptions.cmake.in
+)
+
 if (PACK_COLUMNAR)
         # --------------- related with packaging -------------------
+
+		if (NOT CMAKE_BUILD_TYPE)
+			set ( CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Choose the type of build." FORCE)
+		endif ()
 
         SET ( BINPREFIX "usr/" )
 
         set ( PACKAGE_NAME "manticore-columnar-lib" )
         set ( COMPANY_NAME "Manticore Software LTD" )
         set ( BUILD_TAG "" CACHE STRING "The tag which will be added to build" )
-        set ( PKGSUFFIXES ) # list of suffixes which will be append to package name, will be '-'-separated and added to package file name along with DISTR_SUFFIX
 
         # simpler packages: provide -DPACK=1, and DISTR_BUILD will be set from env $DISTR, easier in dockers
         if (PACK)
@@ -167,7 +146,9 @@ if (PACK_COLUMNAR)
         set ( CPACK_PACKAGE_NAME "${PACKAGE_NAME}" )
         set ( CPACK_PACKAGE_CONTACT "Manticore Team <build@manticoresearch.com>" )
         set ( CMAKE_PROJECT_HOMEPAGE_URL "https://github.com/manticoresoftware/columnar/" )
-        set ( CPACK_PACKAGE_VENDOR "${COMPANY_NAME}" )
+		set ( CPACK_PACKAGE_URL "https://github.com/manticoresoftware/columnar/" )
+		set ( CPACK_PACKAGE_GROUP "Applications/Internet" )
+		set ( CPACK_PACKAGE_VENDOR "${COMPANY_NAME}" )
         set ( CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_BINARY_DIR}/LICENSE" )
         set ( CPACK_PACKAGE_DESCRIPTION_SUMMARY "Manticore Columnar Library is a column-oriented storage library, aiming to provide decent performance with low memory footprint at big data volume")
         set ( CPACK_PACKAGE_DESCRIPTION "Manticore Columnar Library is a column-oriented storage library, aiming to provide decent performance with low memory footprint at big data volume. When used in combination with Manticore Search can be beneficial for faster / lower resource consumption log/metrics analytics and running log / metric analytics in docker / kubernetes")
@@ -176,37 +157,11 @@ if (PACK_COLUMNAR)
 
         include ( CPack )
         cpack_add_component( columnar )
+		cpack_add_component ( devel )
 
         if ( WIN32 )
-                IF ( CMAKE_EXE_LINKER_FLAGS MATCHES "x64" )
-                       LIST ( APPEND PKGSUFFIXES "x64" )
-                else ()
-                       LIST ( APPEND PKGSUFFIXES "win32" )
-                endif ()
+                set ( CPACK_SUFFIX "x64" )
         endif ()
 
-        set ( CPACK_SUFFIX "" )
-        FOREACH ( SUFFIX ${PKGSUFFIXES} )
-                set ( CPACK_SUFFIX "${CPACK_SUFFIX}-${SUFFIX}" )
-        endforeach ()
+		add_dependencies ( columnar columnarpackver )
 endif()
-
-add_custom_target (
-                columnarver
-                COMMAND ${CMAKE_COMMAND}
-                        -D SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
-                        -D BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}
-                        -D BUILD_TAG=${BUILD_TAG}
-                        -D DISTR_SUFFIX=${DISTR_SUFFIX}
-                        -D PACKAGE_NAME=${PACKAGE_NAME}
-                        -D CPACK_SUFFIX=${CPACK_SUFFIX}
-                        -P ${CMAKE_CURRENT_SOURCE_DIR}/rev.cmake
-                COMMENT "Generate version from sources"
-                VERBATIM
-                SOURCES
-                        ${CMAKE_CURRENT_SOURCE_DIR}/rev.cmake
-                        ${CMAKE_CURRENT_SOURCE_DIR}/util/version.h.in
-                        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/CPackOptions.cmake.in
-)
-
-add_dependencies ( columnar columnarver )

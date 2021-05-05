@@ -27,8 +27,6 @@
 #include <fcntl.h>
 #include <climits>
 
-#include "config.h"
-
 namespace columnar
 {
 
