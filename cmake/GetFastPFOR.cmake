@@ -13,30 +13,45 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-set ( REMOTE_URL "https://github.com/lemire/FastPFor/archive/refs/heads/master.zip" )
-
-# cb to realize if we have in-source unpacked FastPFOR
-function ( CHECK_FASTPFOR_SRC RESULT HINT )
-	if (EXISTS "${HINT}/LICENSE")
-		ensure_cmake_is_actual ( "${HINT}" libfastpfor )
-		set ( ${RESULT} TRUE PARENT_SCOPE )
-	endif ()
-endfunction ()
-
-# cb to finalize FastPFOR unpacked sources (add custom cmake)
-function ( PREPARE_FASTPFOR LIB_SRC )
-	diags ( "PREPARE_FASTPFOR invoked" )
-	ensure_cmake_is_actual ( "${LIB_SRC}" libfastpfor )
-endfunction ()
 
 include (populate_fastpfor)
-PROVIDE( FastPFOR FastPFor-master.zip ${REMOTE_URL} )
 
-if (FastPFOR_FROMSOURCES)
-	add_subdirectory ( ${FastPFOR_SRC} ${FastPFOR_BUILD} EXCLUDE_FROM_ALL )
-	set ( FastPFOR_FOUND TRUE )
-endif ()
+get_build_folder_for ( fastpfor LIB_BUILD )
+list ( APPEND CMAKE_PREFIX_PATH "${LIB_BUILD}" )
 
-diag ( FastPFOR_FROMSOURCES FastPFOR_FOUND FastPFOR_SRC FastPFOR_BUILD FastPFOR_FROMSOURCES)
+find_package ( FastPFOR QUIET)
+diag ( FastPFOR_FOUND )
 
-list ( APPEND EXTRA_LIBRARIES FastPFOR )
+if (FastPFOR_FOUND)
+#	include ( "CMakePrintHelpers" )
+#	cmake_print_properties ( TARGETS FastPFOR::FastPFOR PROPERTIES
+#			INTERFACE_COMPILE_OPTIONS
+#			INTERFACE_INCLUDE_DIRECTORIES
+#			IMPORTED_CONFIGURATIONS
+#			IMPORTED_LINK_INTERFACE_LANGUAGES_DEBUG
+#			IMPORTED_LINK_INTERFACE_LANGUAGES_RELEASE
+#			IMPORTED_LOCATION_DEBUG
+#			IMPORTED_LOCATION_RELEASE
+#			IMPORTED_LOCATION_RELWITHDEBINFO
+#			IMPORTED_LOCATION_MINSIZEREL
+#			MAP_IMPORTED_CONFIG_MINSIZEREL
+#			MAP_IMPORTED_CONFIG_RELWITHDEBINFO
+#			MAP_IMPORTED_CONFIG_DEBUG
+#			MAP_IMPORTED_CONFIG_RELEASE
+#			LOCATION
+#			)
+	return()
+endif()
+
+set ( REMOTE_URL "https://github.com/lemire/FastPFor/archive/refs/heads/master.zip" )
+set ( fastpfor_tarball "FastPFor-master.zip" )
+
+populate ( LIB_LOCATION FastPFOR "${LIBS_BUNDLE}/${fastpfor_tarball}" "${REMOTE_URL}" )
+get_srcpath ( LIB_SRC fastpfor )
+
+set ( FASTPFOR_BUILD_DIR "${CMAKE_BINARY_DIR}/fastpfor-cache" )
+configure_file ( ${CMAKE_MODULE_PATH}/fastpfor.cmake.in ${FASTPFOR_BUILD_DIR}/CMakeLists.txt )
+execute_process ( COMMAND ${CMAKE_COMMAND} -G "${CMAKE_GENERATOR}" . WORKING_DIRECTORY ${FASTPFOR_BUILD_DIR} )
+execute_process ( COMMAND ${CMAKE_COMMAND} --build . WORKING_DIRECTORY ${FASTPFOR_BUILD_DIR} )
+
+find_package ( FastPFOR REQUIRED )

@@ -4,19 +4,22 @@
 # Copyright (c) 2012 Louis Dionne
 #
 cmake_minimum_required(VERSION 3.1)
+
+FOREACH (policy CMP0091 CMP0022)
+    IF (POLICY ${policy})
+        CMAKE_POLICY ( SET ${policy} NEW )
+    ENDIF ()
+ENDFOREACH ()
+
 project(FastPFOR CXX C)
+set ( PROJECT_VERSION "0.1.9" )
 
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_CXX_STANDARD 14)
 
 if (NOT CMAKE_BUILD_TYPE)
-    message ( STATUS "No build type selected, default to Release" )
     set ( CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build." FORCE )
 endif ()
-
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules")
-include(AppendCompilerFlags)
-include(DetectCPUFeatures)
 
 if ( NOT CMAKE_SIZEOF_VOID_P EQUAL 8 )
    MESSAGE( FATAL_ERROR "Please use a 64-bit system. " )
@@ -39,16 +42,16 @@ set ( GNUC "$<COMPILE_LANG_AND_ID:C,Clang,AppleClang,GNU>" )
 set ( GNUC_CXX "$<OR:${GNUCXX},${GNUC}>" )
 
 add_library ( FastPFOR STATIC ${FastPFOR_SRCS} )
-target_include_directories ( FastPFOR PUBLIC headers )
+target_include_directories ( FastPFOR PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/headers> )
 target_compile_options ( FastPFOR PUBLIC $<$<COMPILE_LANG_AND_ID:CXX,MSVC>:-D_CRT_SECURE_NO_WARNINGS -wd4267 -wd4244> )
 target_compile_options ( FastPFOR PRIVATE $<${GNUC_CXX}:-msse4.1> )
 
-set_target_properties ( FastPFOR PROPERTIES POSITION_INDEPENDENT_CODE TRUE )
+set_target_properties ( FastPFOR PROPERTIES POSITION_INDEPENDENT_CODE TRUE MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 if(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
     # require at least gcc 4.7
-    if (CXX_COMPILER_VERSION VERSION_LESS 4.7)
-        message(STATUS "GCC version must be at least 4.7!")
+    if (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 4.7)
+        message(STATUS "GCC version must be at least 4.7, got  ${CMAKE_CXX_COMPILER_VERSION}!")
     endif()
     # Uncomment the following lines to see how the code compiles without AVX,SSE4.2 and/or SSE2
     #set (CMAKE_CXX_FLAGS_RELEASE "-Wall -Ofast -lm  -DNDEBUG -std=c++11 -DHAVE_CXX0X -march=x86-64")
@@ -70,7 +73,7 @@ elseif(${CMAKE_CXX_COMPILER_ID} STREQUAL "Intel")
     #set (CMAKE_C_FLAGS_DEBUG   "-Wall -ggdb   -std=c99  -march=native")
 elseif(${CMAKE_CXX_COMPILER_ID} STREQUAL "Clang")
     if (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 4.2.1)
-        message( FATAL_ERROR  "Clang version must be at least 4.2.1! (provided ${CXX_COMPILER_VERSION}" )
+        message( FATAL_ERROR  "Clang version must be at least 4.2.1! (provided ${CMAKE_CXX_COMPILER_VERSION}" )
     endif()
     #set (CMAKE_CXX_FLAGS_RELEASE "-Wall -Wcast-align -O3 -DNDEBUG -std=c++11 -DHAVE_CXX0X -msse4.1 -march=native")
     #set (CMAKE_CXX_FLAGS_DEBUG   "-Wall -Wcast-align -ggdb  -std=c++11 -DHAVE_CXX0X -msse4.1 -march=native")
@@ -85,5 +88,41 @@ else ()
     message(FATAL_ERROR "Please, use MSVC, GCC, Clang, or the Intel compiler!")
 endif()
 
-export ( TARGETS FastPFOR FILE "${CMAKE_CURRENT_BINARY_DIR}/fastpfor-targets.cmake" NAMESPACE FastPFOR:: )
-add_library ( FastPFOR::FastPFOR ALIAS FastPFOR )
+
+install ( TARGETS FastPFOR EXPORT FastPFORExport ARCHIVE DESTINATION "lib/$<CONFIG>" INCLUDES DESTINATION "include" )
+install ( FILES "$<TARGET_FILE_DIR:FastPFOR>/FastPFOR.pdb" EXPORT FastPFORExport DESTINATION "lib/$<CONFIG>" OPTIONAL )
+install ( DIRECTORY "headers/" DESTINATION include )
+
+install ( EXPORT FastPFORExport
+        FILE "FastPFORTargets.cmake"
+        DESTINATION "cmake"
+        NAMESPACE "FastPFOR::" )
+
+# below is for support find_package(fastpfor)
+include ( CMakePackageConfigHelpers )
+
+set ( pkgconfin "${CMAKE_CURRENT_BINARY_DIR}/FastPFORConfig.cmake.in" )
+file ( WRITE "${pkgconfin}" "@PACKAGE_INIT@
+
+if(NOT TARGET FastPFOR::FastPFOR)
+    include(\"\${CMAKE_CURRENT_LIST_DIR}/FastPFORTargets.cmake\")
+    get_target_property ( configs FastPFOR::FastPFOR IMPORTED_CONFIGURATIONS )
+    foreach (config DEBUG RELWITHDEBINFO MINSIZEREL)
+        if (NOT \${config} IN_LIST configs)
+            set_property ( TARGET FastPFOR::FastPFOR PROPERTY MAP_IMPORTED_CONFIG_\${config} Release )
+        endif ()
+    endforeach ()
+endif()" )
+
+configure_package_config_file ( "${pkgconfin}"
+        "${CMAKE_CURRENT_BINARY_DIR}/FastPFORConfig.cmake"
+        INSTALL_DESTINATION "cmake" )
+install ( FILES
+        "${CMAKE_CURRENT_BINARY_DIR}/FastPFORConfig.cmake"
+        DESTINATION "cmake" )
+
+write_basic_package_version_file ( "FastPFORConfigVersion.cmake"
+        COMPATIBILITY SameMajorVersion )
+install ( FILES
+        "${CMAKE_CURRENT_BINARY_DIR}/FastPFORConfigVersion.cmake"
+        DESTINATION "cmake" )
