@@ -498,7 +498,7 @@ protected:
 	int								GetValueLength_PFOR()		{ return m_tBlockPFOR.GetValueLength ( ReadSubblock(m_tBlockPFOR) ); }
 
 	template <typename SUBBLOCK>
-	int								ReadSubblock ( SUBBLOCK & tSubblock );
+	FORCE_INLINE int				ReadSubblock ( SUBBLOCK & tSubblock );
 };
 
 template<typename T>
