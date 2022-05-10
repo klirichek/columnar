@@ -27,6 +27,23 @@
 namespace columnar
 {
 
+template <typename T>
+static bool ValueInInterval ( T tValue, const Filter_t & tFilter )
+{
+	T tMin = (T)tFilter.m_iMinValue;
+	T tMax = (T)tFilter.m_iMaxValue;
+
+	if ( tFilter.m_bLeftUnbounded )
+		return tFilter.m_bRightClosed ? ( tValue<=tMax ) : ( tValue<tMax );
+
+	if ( tFilter.m_bRightUnbounded )
+		return tFilter.m_bLeftClosed ? ( tValue>=tMin ) : ( tValue>tMin );
+
+	return ( tFilter.m_bLeftClosed ? ( tValue>=tMin ) : ( tValue>tMin ) ) && ( tFilter.m_bRightClosed ? ( tValue<=tMax ) : ( tValue<tMax ) );
+}
+
+/////////////////////////////////////////////////////////////////////
+
 class StoredBlock_Bool_Const_c
 {
 public:

@@ -21,7 +21,7 @@
 
 namespace SI
 {
-	static const int LIB_VERSION = 1;
+	static const int LIB_VERSION = 2;
 	static const uint32_t STORAGE_VERSION = 1;
 
 	enum class AttrType_e : uint32_t

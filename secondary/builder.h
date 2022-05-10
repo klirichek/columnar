@@ -1,4 +1,4 @@
-// Copyright (c) 2020-2021, Manticore Software LTD (https://manticoresearch.com)
+// Copyright (c) 2020-2022, Manticore Software LTD (https://manticoresearch.com)
 // All rights reserved
 //
 //
@@ -31,13 +31,6 @@ public:
 	virtual void	SetAttr ( int iAttr, const int64_t * pData, int iLength ) = 0;
 
 	virtual bool	Done ( std::string & sError ) = 0;
-};
-
-struct SourceAttrTrait_t
-{
-	AttrType_e	m_eType { AttrType_e::NONE };
-	int			m_iAttr { -1 };
-	std::string m_sName;
 };
 
 } // namespace SI

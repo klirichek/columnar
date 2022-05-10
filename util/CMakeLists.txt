@@ -28,6 +28,7 @@ ADD_LIBRARY ( util OBJECT
 		delta.h
 		reader.h
 		codec.h
+		blockiterator.h
 		)
 
 include ( CheckFunctionExists )

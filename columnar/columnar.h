@@ -17,6 +17,7 @@
 #pragma once
 
 #include "util/util.h"
+#include "util/blockiterator.h"
 #include <functional>
 
 namespace columnar
@@ -38,17 +39,6 @@ public:
 	virtual	int			Get ( const uint8_t * & pData ) = 0;
 	virtual	uint8_t *	GetPacked() = 0;
 	virtual	int			GetLength() = 0;
-};
-
-
-class BlockIterator_i
-{
-public:
-	virtual				~BlockIterator_i() = default;
-
-	virtual bool		HintRowID ( uint32_t tRowID ) = 0;
-	virtual bool		GetNextRowIdBlock ( Span_T<uint32_t> & dRowIdBlock ) = 0;
-	virtual int64_t		GetNumProcessed() const = 0;
 };
 
 

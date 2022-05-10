@@ -1,4 +1,4 @@
-// Copyright (c) 2020-2021, Manticore Software LTD (https://manticoresearch.com)
+// Copyright (c) 2020-2022, Manticore Software LTD (https://manticoresearch.com)
 // All rights reserved
 //
 //
@@ -14,7 +14,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "sidx.h"
+#include "builder.h"
+#include "secondary.h"
 #include "codec.h"
 #include "delta.h"
 #include "pgm.h"
@@ -36,34 +37,37 @@ namespace SI
 
 #define BUILD_PRINT_VALUES 0
 #define VALUES_PER_BLOCK 128
+#define ROWIDS_PER_BLOCK 1024
 
-struct SIWriter_i
+
+class SIWriter_i
 {
-	SIWriter_i() = default;
-	virtual ~SIWriter_i() = default;
+public:
+					SIWriter_i() = default;
+	virtual			~SIWriter_i() = default;
 
-	virtual bool Setup ( const std::string & sSrcFile, uint64_t iFileSize, std::vector<uint64_t> & dOffset, std::string & sError ) = 0;
-	virtual bool Process ( FileWriter_c & tDstFile, FileWriter_c & tTmpBlocksOff, const std::string & sPgmValuesName, std::string & sError ) = 0;
-
-	std::vector<uint64_t> m_dOffset;
-	std::vector<uint8_t> m_dPGM;
+	virtual bool	Setup ( const std::string & sSrcFile, uint64_t iFileSize, std::vector<uint64_t> & dOffset, std::string & sError ) = 0;
+	virtual bool	Process ( FileWriter_c & tDstFile, FileWriter_c & tTmpBlocksOff, const std::string & sPgmValuesName, std::string & sError ) = 0;
+	virtual const std::vector<uint8_t> & GetPGM() = 0;
 };
 
-struct RawWriter_i
+
+class RawWriter_i
 {
-	RawWriter_i() = default;
-	virtual ~RawWriter_i() = default;
+public:
+					RawWriter_i() = default;
+	virtual			~RawWriter_i() = default;
 
-	virtual bool Setup ( const char * sFile, int iAttr, AttrType_e eAttrType, Collation_e eCollation, std::string & sError ) = 0;
-	virtual int GetItemSize () const = 0;
-	virtual void SetItemsCount ( int iSize ) = 0;
+	virtual bool	Setup ( const char * sFile, int iAttr, AttrType_e eAttrType, Collation_e eCollation, std::string & sError ) = 0;
+	virtual int		GetItemSize () const = 0;
+	virtual void	SetItemsCount ( int iSize ) = 0;
 
-	virtual void SetAttr ( uint32_t tRowID, int64_t tAttr ) = 0;
-	virtual void SetAttr ( uint32_t tRowID, const uint8_t * pData, int iLength ) = 0;
-	virtual void SetAttr ( uint32_t tRowID, const int64_t * pData, int iLength ) = 0;
+	virtual void	SetAttr ( uint32_t tRowID, int64_t tAttr ) = 0;
+	virtual void	SetAttr ( uint32_t tRowID, const uint8_t * pData, int iLength ) = 0;
+	virtual void	SetAttr ( uint32_t tRowID, const int64_t * pData, int iLength ) = 0;
 
-	virtual void Flush () = 0;
-	virtual void Done() = 0;
+	virtual void	Flush () = 0;
+	virtual void	Done() = 0;
 
 	virtual SIWriter_i * GetWriter ( std::string & sError ) = 0;
 };
@@ -331,7 +335,7 @@ bool Builder_c::Done ( std::string & sError )
 			return false;
 
 		// temp meta
-		WriteVectorLen ( pWriter->m_dPGM, tTmpPgm );
+		WriteVectorLen ( pWriter->GetPGM(), tTmpPgm );
 
 		// clean up used memory
 		m_dCidWriter[iWriter] = nullptr;
@@ -383,6 +387,7 @@ bool Builder_c::WriteMeta ( const std::string & sPgmName, const std::string & sB
 		tDstFile.Write_string ( g_sCompressionUINT64 );
 		tDstFile.Write_uint32 ( (uint32_t)m_eCollation );
 		tDstFile.Write_uint32 ( VALUES_PER_BLOCK );
+		tDstFile.Write_uint32 ( ROWIDS_PER_BLOCK );
 		
 		// write schema
 		for ( const auto & tInfo : m_dAttrs )
@@ -497,19 +502,6 @@ inline void RawWriter_T<float>::SetAttr ( uint32_t tRowID, const int64_t * pData
 	assert ( 0 && "INTERNAL ERROR: sending MVA to float packer" );
 }
 
-template<typename SRC_VALUE, typename DST_VALUE>
-struct SIWriter_T : public SIWriter_i
-{
-	std::string m_sSrcName;
-	uint64_t m_iFileSize = 0;
-
-	SIWriter_T () = default;
-	virtual ~SIWriter_T() = default;
-
-	bool Setup ( const std::string & sSrcFile, uint64_t iFileSize, std::vector<uint64_t> & dOffset, std::string & sError ) final;
-	bool Process ( FileWriter_c & tDstFile, FileWriter_c & tTmpBlocksOff, const std::string & sPgmValuesName, std::string & sError ) final;
-};
-
 template<typename VALUE>
 SIWriter_i * RawWriter_T<VALUE>::GetWriter ( std::string & sError )
 {
@@ -540,15 +532,124 @@ SIWriter_i * RawWriter_T<VALUE>::GetWriter ( std::string & sError )
 	return pWriter.release();
 }
 
+/////////////////////////////////////////////////////////////////////
+
+template<typename SRC_VALUE, typename DST_VALUE>
+class SIWriter_T : public SIWriter_i
+{
+public:
+				SIWriter_T () = default;
+	virtual		~SIWriter_T() = default;
+
+	bool		Setup ( const std::string & sSrcFile, uint64_t iFileSize, std::vector<uint64_t> & dOffset, std::string & sError ) final;
+	bool		Process ( FileWriter_c & tDstFile, FileWriter_c & tTmpBlocksOff, const std::string & sPgmValuesName, std::string & sError ) final;
+	const std::vector<uint8_t> & GetPGM() { return m_dPGM; }
+
+private:
+	std::string				m_sSrcName;
+	uint64_t				m_iFileSize = 0;
+	std::vector<uint8_t>	m_dPGM;
+	std::vector<uint64_t>	m_dOffset;
+};
+
 template<typename SRC_VALUE, typename DST_VALUE>
 bool SIWriter_T<SRC_VALUE, DST_VALUE>::Setup ( const std::string & sSrcName, uint64_t iFileSize, std::vector<uint64_t> & dOffset, std::string & sError )
 {
-	m_dOffset = std::move ( dOffset );
+	m_dOffset = std::move(dOffset);
 	m_sSrcName = sSrcName;
 	m_iFileSize = iFileSize;
 
 	return true;
 }
+
+template<typename SRC_VALUE, typename DST_VALUE>
+bool SIWriter_T<SRC_VALUE, DST_VALUE>::Process ( FileWriter_c & tDstFile, FileWriter_c & tTmpBlocksOff, const std::string & sPgmValuesName, std::string & sError )
+{
+#if BUILD_PRINT_VALUES
+	std::cout << m_sSrcName << std::endl;
+#endif
+
+	FileWriter_c tTmpValsPGM;
+	if ( !tTmpValsPGM.Open ( sPgmValuesName, true, false, true, sError ) )
+		return false;
+
+	std::priority_queue< BinValue_T<SRC_VALUE>, std::vector < BinValue_T<SRC_VALUE> >, PQGreater<SRC_VALUE> > dBins;
+
+	std::vector<std::unique_ptr< columnar::FileReader_c > > dSrcFile ( m_dOffset.size() );
+	for ( int iReader=0; iReader<m_dOffset.size(); iReader++ )
+	{
+		columnar::FileReader_c * pReader = new columnar::FileReader_c();
+		dSrcFile[iReader].reset ( pReader );
+
+		if ( !pReader->Open ( m_sSrcName, sError ) )
+			return false;
+
+		pReader->Seek ( m_dOffset[iReader] );
+		// set file chunk end
+		int64_t iBinEnd = 0;
+		if ( iReader<m_dOffset.size()-1 )
+			iBinEnd = m_dOffset[iReader+1];
+		else
+			iBinEnd = m_iFileSize;
+
+		BinValue_T<SRC_VALUE> tBin;
+		tBin.m_pReader = pReader;
+		tBin.m_iBinEnd = iBinEnd;
+		tBin.Read();
+
+		dBins.push ( tBin );
+	}
+
+	RowWriter_T<DST_VALUE, std::is_floating_point<SRC_VALUE>::value > tWriter ( &tTmpBlocksOff, &tTmpValsPGM );
+
+	// initial fill
+	if ( dBins.size() )
+	{
+		BinValue_T<SRC_VALUE> tBin = dBins.top();
+		dBins.pop();
+		tWriter.AddValue ( Convert ( tBin ) );
+		if ( tBin.Read() )
+			dBins.push ( tBin );
+	}
+
+	while ( !dBins.empty() )
+	{
+		BinValue_T<SRC_VALUE> tBin = dBins.top();
+		dBins.pop();
+
+		tWriter.NextValue ( Convert ( tBin ), tDstFile );
+
+		if ( tBin.Read() )
+			dBins.push ( tBin );
+	}
+
+	tWriter.Done ( tDstFile );
+
+	dSrcFile.clear(); // to free up memory for PGM build phase
+	::unlink ( m_sSrcName.c_str() );
+
+	tTmpValsPGM.Close();
+	MappedBuffer_T<SRC_VALUE> tMappedPGM;
+	if ( !tMappedPGM.Open ( sPgmValuesName, sError ) )
+		return false;
+
+	assert ( std::is_sorted ( tMappedPGM.begin(), tMappedPGM.end() ) );
+	PGM_T<SRC_VALUE> tInv ( tMappedPGM.begin(), tMappedPGM.end() );
+	tInv.Save ( m_dPGM );
+
+#if BUILD_PRINT_VALUES
+	for ( int i=0; i<tPGMVals.size(); i++ )
+	{
+		ApproxPos_t tRes = tInv.Search ( tPGMVals[i] );
+		if ( tRes.m_iLo/3!=tRes.m_iHi/3 )
+			std::cout << "val[" << i << "] " << (uint32_t)tPGMVals[i] << ", lo " << tRes.m_iLo/3 << ", hi " << tRes.m_iHi/3 << ", pos " << tRes.m_iPos/3 << " " << std::endl;
+	}
+#endif
+
+	return true;
+}
+
+/////////////////////////////////////////////////////////////////////
 
 template<typename VALUE>
 struct BinValue_T : public RawValue_T<VALUE>
@@ -611,7 +712,7 @@ RawValue_T<uint64_t> Convert ( const BinValue_T<uint64_t> & tSrc )
 }
 
 template<typename VEC>
-void EncodeRowsBlock ( VEC & dSrcRows, uint32_t iOff, uint32_t iCount, IntCodec_i * pCodec, std::vector<uint32_t> & dBufRows, MemWriter_c & tWriter )
+static void EncodeRowsBlock ( VEC & dSrcRows, uint32_t iOff, uint32_t iCount, IntCodec_i * pCodec, std::vector<uint32_t> & dBufRows, MemWriter_c & tWriter )
 {
 	Span_T<uint32_t> dRows ( dSrcRows.data() + iOff, iCount );
 	if ( FastPForLib::needPaddingTo128Bits( dRows.begin() ) )
@@ -620,23 +721,18 @@ void EncodeRowsBlock ( VEC & dSrcRows, uint32_t iOff, uint32_t iCount, IntCodec_
 		dRows = Span_T<uint32_t> ( dSrcRows.data(), iCount );
 	}
 
-	dBufRows.resize ( 0 );
-	const auto tMin = dRows.front();
-	const auto tMax = dRows.back();
-
+	dBufRows.resize(0);
 	ComputeDeltas ( dRows.data(), (int)dRows.size(), true );
 	pCodec->Encode ( dRows, dBufRows );
 
-	// block meta: 3 DWORD
-	// [min-row-id, row-id-delta, block-size]
+	// block meta
+	// [block-size]
 	// [packed block]
-	tWriter.Pack_uint32 ( tMin );
-	tWriter.Pack_uint32 ( tMax - tMin );
 	WriteVectorLen32 ( dBufRows, tWriter );
 }
 
-template<typename VEC>
-void EncodeBlock ( VEC & dSrc, IntCodec_i * pCodec, std::vector<uint32_t> & dBuf, FileWriter_c & tWriter )
+template<typename VEC, typename WRITER>
+void EncodeBlock ( VEC & dSrc, IntCodec_i * pCodec, std::vector<uint32_t> & dBuf, WRITER & tWriter )
 {
 	dBuf.resize ( 0 );
 
@@ -672,247 +768,218 @@ void WriteRawValues<> ( const std::vector<uint64_t> & dSrc, FileWriter_c & tWrit
 		tWriter.Write_uint64 ( uVal );
 }
 
-template<typename VALUE, bool FLOAT_VALUE>
-struct RowWriter_t
-{
-	std::vector<VALUE> m_dValues;
-	std::vector<uint32_t> m_dTypes;
-	std::vector<uint32_t> m_dRowStart;
-	std::vector<uint32_t> m_dRows;
+/////////////////////////////////////////////////////////////////////
 
-	std::vector<uint32_t> m_dBufTmp;
-	std::vector<uint8_t> m_dRowsPacked;
-	VALUE m_tLastValue { 0 };
+template<typename VALUE, bool FLOAT_VALUE>
+class RowWriter_T
+{
+public:
+				RowWriter_T ( FileWriter_c * pBlocksOff, FileWriter_c * pPGMVals );
+
+	void		Done ( FileWriter_c & tWriter )	{ FlushBlock ( tWriter ); }
+	void		AddValue ( const RawValue_T<VALUE> & tBin );
+	void		NextValue ( const RawValue_T<VALUE> & tBin, FileWriter_c & m_tDstFile );
+
+private:
+	std::vector<VALUE>		m_dValues;
+	std::vector<uint32_t>	m_dTypes;
+	std::vector<uint32_t>	m_dSizes;
+	std::vector<uint32_t>	m_dRowStart;
+	std::vector<uint32_t>	m_dRows;
+	std::vector<uint32_t>	m_dMinMax;
+
+	std::vector<uint32_t>	m_dBufTmp;
+	std::vector<uint8_t>	m_dRowsPacked;
+	VALUE					m_tLastValue { 0 };
 
 	std::unique_ptr<IntCodec_i>	m_pCodec { nullptr };
 
-	FileWriter_c * m_pBlocksOff { nullptr };
-	FileWriter_c * m_pPGMVals { nullptr };
+	FileWriter_c *			m_pBlocksOff = nullptr;
+	FileWriter_c *			m_pPGMVals = nullptr;
 
-	RowWriter_t()
-	{
-		m_dValues.reserve ( VALUES_PER_BLOCK );
-		m_dRowStart.reserve ( VALUES_PER_BLOCK );
-		m_dRows.reserve ( VALUES_PER_BLOCK * 16 );
-
-		m_dBufTmp.reserve ( VALUES_PER_BLOCK );
-		m_dRowsPacked.reserve ( VALUES_PER_BLOCK * 16 );
-
-		m_pCodec.reset ( CreateIntCodec ( g_sCompressionUINT32, g_sCompressionUINT64 ) );
-
-	}
-
-	void FlushValue ( FileWriter_c & tWriter )
-	{
-		if ( m_dValues.size()<VALUES_PER_BLOCK )
-			return;
-
-		FlushBlock ( tWriter );
-	}
-
-	void FlushBlock ( FileWriter_c & tWriter )
-	{
-		assert ( m_dValues.size()==m_dRowStart.size() );
-		if ( !m_dValues.size() )
-			return;
-
-		const uint32_t iValues = (uint32_t)m_dValues.size();
-		// FIXME!!! set flags: IsValsAsc \ IsValsDesc and CalcDelta with these flags or skip delta encoding
-		//assert ( std::is_sorted ( m_dValues.begin(), m_dValues.end() ) );
-
-		// replace with FLAGS
-		bool bLenDelta = true;
-
-		// FIXME!!! pack per block meta
-
-		// pack rows
-		MemWriter_c tBlockWriter ( m_dRowsPacked );
-		m_dTypes.resize ( iValues );
-		for ( size_t iItem=0; iItem<iValues; iItem++)
-		{
-			uint32_t uSrcRowsStart = m_dRowStart[iItem];
-			size_t uSrcRowsCount = (  iItem+1<m_dRowStart.size() ? m_dRowStart[iItem+1] - uSrcRowsStart : m_dRows.size() - uSrcRowsStart );
-
-			if ( uSrcRowsCount==1 )
-			{
-				m_dTypes[iItem] = (uint32_t)Packing_e::ROW;
-				m_dRowStart[iItem] = m_dRows[uSrcRowsStart];
-				bLenDelta = false;
-
-			} else if ( uSrcRowsCount<=VALUES_PER_BLOCK )
-			{
-				m_dTypes[iItem] = (uint32_t)Packing_e::ROW_BLOCK;
-				m_dRowStart[iItem] = (uint32_t)tBlockWriter.GetPos();
-
-				EncodeRowsBlock ( m_dRows, uSrcRowsStart, (int)uSrcRowsCount, m_pCodec.get(), m_dBufTmp, tBlockWriter );
-			} else
-			{
-				m_dTypes[iItem] = (uint32_t)Packing_e::ROW_BLOCKS_LIST;
-				m_dRowStart[iItem] = (uint32_t)tBlockWriter.GetPos();
-
-				int iBlocks = (int)( ( uSrcRowsCount + VALUES_PER_BLOCK - 1 ) / VALUES_PER_BLOCK );
-				// block meta: 1 DWORD
-				// blocks count
-				tBlockWriter.Pack_uint32 ( iBlocks );
-
-				for ( int iBlock=0; iBlock<iBlocks; iBlock++ )
-				{
-					uint32_t uSrcStart = uSrcRowsStart + iBlock * VALUES_PER_BLOCK;
-					uint32_t uSrcCount = VALUES_PER_BLOCK;
-					if ( iBlock==iBlocks-1 )
-						uSrcCount = (uint32_t)( uSrcRowsCount - ( iBlock * VALUES_PER_BLOCK ) );
-
-					EncodeRowsBlock ( m_dRows, uSrcStart, uSrcCount, m_pCodec.get(), m_dBufTmp, tBlockWriter );
-				}
-			}
-		}
-
-		// write offset to block into temporary file
-		m_pBlocksOff->Write_uint64 ( tWriter.GetPos() );
-		// write values for PGM builder
-		WriteRawValues ( m_dValues, *m_pPGMVals );
-
-		// write into file
-		EncodeBlock ( m_dValues, m_pCodec.get(), m_dBufTmp, tWriter );
-		EncodeBlockWoDelta ( m_dTypes, m_pCodec.get(), m_dBufTmp, tWriter );
-		tWriter.Write_uint8 ( (uint8_t)bLenDelta );
-		if ( bLenDelta )
-		{
-			EncodeBlock ( m_dRowStart, m_pCodec.get(), m_dBufTmp, tWriter );
-		} else
-		{
-			EncodeBlockWoDelta ( m_dRowStart, m_pCodec.get(), m_dBufTmp, tWriter );
-		}
-		WriteVector ( m_dRowsPacked, tWriter );
-
-		m_dValues.resize ( 0 );
-		m_dTypes.resize ( 0 );
-		m_dRowStart.resize ( 0 );
-		m_dRows.resize ( 0 );
-		m_dRowsPacked.resize ( 0 );
-	}
-
-	void Done ( FileWriter_c & tWriter )
-	{
-		FlushBlock ( tWriter );
-	}
-
-	void AddValue ( const RawValue_T<VALUE> & tBin )
-	{
-		m_dRowStart.push_back ( (uint32_t)m_dRows.size() );
-
-		m_dValues.push_back ( tBin.m_tValue );
-		m_dRows.push_back ( tBin.m_tRowid );
-		m_tLastValue = tBin.m_tValue;
-	}
-
-	void NextValue ( const RawValue_T<VALUE> & tBin, FileWriter_c & m_tDstFile )
-	{
-		// collect row-list
-		// or flush and store new value
-		if ( FLOAT_VALUE && ( FloatEqual ( UintToFloat ( m_tLastValue ), UintToFloat ( tBin.m_tValue ) ) ) )
-		{
-			m_dRows.push_back ( tBin.m_tRowid );
-		}
-		else if ( !FLOAT_VALUE && m_tLastValue==tBin.m_tValue ) 
-		{
-			m_dRows.push_back ( tBin.m_tRowid );
-		} else
-		{
-			FlushValue ( m_tDstFile );
-			AddValue ( tBin );
-		}
-	}
+	void	FlushValue ( FileWriter_c & tWriter );
+	void	WriteSingleRow ( int iItem, uint32_t uSrcRowsStart );
+	void	WriteSingleBlock ( int iItem, uint32_t uSrcRowsStart, uint32_t uSrcRowsCount, MemWriter_c & tBlockWriter );
+	void	WriteBlockList ( int iItem, uint32_t uSrcRowsStart, uint32_t uSrcRowsCount, MemWriter_c & tBlockWriter );
+	void	ResetData();
+	void	FlushBlock ( FileWriter_c & tWriter );
 };
 
-template<typename SRC_VALUE, typename DST_VALUE>
-bool SIWriter_T<SRC_VALUE, DST_VALUE>::Process ( FileWriter_c & tDstFile, FileWriter_c & tTmpBlocksOff, const std::string & sPgmValuesName, std::string & sError )
+template<typename VALUE, bool FLOAT_VALUE>
+RowWriter_T<VALUE, FLOAT_VALUE>::RowWriter_T ( FileWriter_c * pBlocksOff, FileWriter_c * pPGMVals )
+	: m_pBlocksOff ( pBlocksOff )
+	, m_pPGMVals ( pPGMVals )
 {
-#if BUILD_PRINT_VALUES
-	std::cout << m_sSrcName << std::endl;
-#endif
+	m_dValues.reserve ( VALUES_PER_BLOCK );
+	m_dRowStart.reserve ( VALUES_PER_BLOCK );
+	m_dRows.reserve ( VALUES_PER_BLOCK * 16 );
 
-	FileWriter_c tTmpValsPGM;
-	if ( !tTmpValsPGM.Open ( sPgmValuesName, true, false, true, sError ) )
-		return false;
+	m_dBufTmp.reserve ( VALUES_PER_BLOCK );
+	m_dRowsPacked.reserve ( VALUES_PER_BLOCK * 16 );
 
-	std::priority_queue< BinValue_T<SRC_VALUE>, std::vector < BinValue_T<SRC_VALUE> >, PQGreater<SRC_VALUE> > dBins;
+	m_pCodec.reset ( CreateIntCodec ( g_sCompressionUINT32, g_sCompressionUINT64 ) );
 
-	std::vector<std::unique_ptr< columnar::FileReader_c > > dSrcFile ( m_dOffset.size() );
-	for ( int iReader=0; iReader<m_dOffset.size(); iReader++ )
-	{
-		columnar::FileReader_c * pReader = new columnar::FileReader_c();
-		dSrcFile[iReader].reset ( pReader );
-
-		if ( !pReader->Open ( m_sSrcName, sError ) )
-			return false;
-
-		pReader->Seek ( m_dOffset[iReader] );
-		// set file chunk end
-		int64_t iBinEnd = 0;
-		if ( iReader<m_dOffset.size()-1 )
-			iBinEnd = m_dOffset[iReader+1];
-		else
-			iBinEnd = m_iFileSize;
-
-		BinValue_T<SRC_VALUE> tBin;
-		tBin.m_pReader = pReader;
-		tBin.m_iBinEnd = iBinEnd;
-		tBin.Read();
-
-		dBins.push ( tBin );
-	}
-
-	RowWriter_t<DST_VALUE, std::is_floating_point<SRC_VALUE>::value > tWriter;
-	tWriter.m_pBlocksOff = &tTmpBlocksOff;
-	tWriter.m_pPGMVals = &tTmpValsPGM;
-
-	// initial fill
-	if ( dBins.size() )
-	{
-		BinValue_T<SRC_VALUE> tBin = dBins.top();
-		dBins.pop();
-		tWriter.AddValue ( Convert ( tBin ) );
-		if ( tBin.Read() )
-			dBins.push ( tBin );
-	}
-
-	while ( !dBins.empty() )
-	{
-		BinValue_T<SRC_VALUE> tBin = dBins.top();
-		dBins.pop();
-
-		tWriter.NextValue ( Convert ( tBin ), tDstFile );
-
-		if ( tBin.Read() )
-			dBins.push ( tBin );
-	}
-
-	tWriter.Done ( tDstFile );
-
-	dSrcFile.clear(); // to free up memory for PGM build phase
-	::unlink ( m_sSrcName.c_str() );
-
-	tTmpValsPGM.Close();
-	MappedBuffer_T<SRC_VALUE> tMappedPGM;
-	if ( !tMappedPGM.Open ( sPgmValuesName, sError ) )
-		return false;
-
-	assert ( std::is_sorted ( tMappedPGM.begin(), tMappedPGM.end() ) );
-	PGM_T<SRC_VALUE> tInv ( tMappedPGM.begin(), tMappedPGM.end() );
-	tInv.Save ( m_dPGM );
-
-#if BUILD_PRINT_VALUES
-	for ( int i=0; i<tPGMVals.size(); i++ )
-	{
-		ApproxPos_t tRes = tInv.Search ( tPGMVals[i] );
-		if ( tRes.m_iLo/3!=tRes.m_iHi/3 )
-			std::cout << "val[" << i << "] " << (uint32_t)tPGMVals[i] << ", lo " << tRes.m_iLo/3 << ", hi " << tRes.m_iHi/3 << ", pos " << tRes.m_iPos/3 << " " << std::endl;
-	}
-#endif
-
-	return true;
 }
+
+template<typename VALUE, bool FLOAT_VALUE>
+void RowWriter_T<VALUE, FLOAT_VALUE>::AddValue ( const RawValue_T<VALUE> & tBin )
+{
+	m_dRowStart.push_back ( (uint32_t)m_dRows.size() );
+
+	m_dValues.push_back ( tBin.m_tValue );
+	m_dRows.push_back ( tBin.m_tRowid );
+	m_tLastValue = tBin.m_tValue;
+}
+
+template<typename VALUE, bool FLOAT_VALUE>
+void RowWriter_T<VALUE, FLOAT_VALUE>::NextValue ( const RawValue_T<VALUE> & tBin, FileWriter_c & m_tDstFile )
+{
+	// collect row-list
+	// or flush and store new value
+	if ( FLOAT_VALUE && ( FloatEqual ( UintToFloat ( m_tLastValue ), UintToFloat ( tBin.m_tValue ) ) ) )
+		m_dRows.push_back ( tBin.m_tRowid );
+	else if ( !FLOAT_VALUE && m_tLastValue==tBin.m_tValue ) 
+		m_dRows.push_back ( tBin.m_tRowid );
+	else
+	{
+		FlushValue(m_tDstFile);
+		AddValue(tBin);
+	}
+}
+
+template<typename VALUE, bool FLOAT_VALUE>
+void RowWriter_T<VALUE, FLOAT_VALUE>::FlushValue ( FileWriter_c & tWriter )
+{
+	if ( m_dValues.size()<ROWIDS_PER_BLOCK )
+		return;
+
+	FlushBlock ( tWriter );
+}
+
+template<typename VALUE, bool FLOAT_VALUE>
+void RowWriter_T<VALUE, FLOAT_VALUE>::WriteSingleRow ( int iItem, uint32_t uSrcRowsStart )
+{
+	m_dTypes[iItem] = (uint32_t)Packing_e::ROW;
+	m_dRowStart[iItem] = m_dRows[uSrcRowsStart];
+}
+
+template<typename VALUE, bool FLOAT_VALUE>
+void RowWriter_T<VALUE, FLOAT_VALUE>::WriteSingleBlock ( int iItem, uint32_t uSrcRowsStart, uint32_t uSrcRowsCount, MemWriter_c & tBlockWriter )
+{
+	m_dTypes[iItem] = (uint32_t)Packing_e::ROW_BLOCK;
+	m_dRowStart[iItem] = (uint32_t)tBlockWriter.GetPos();
+
+	uint32_t uMin = m_dRows[uSrcRowsStart];
+	uint32_t uMax = m_dRows[uSrcRowsStart + uSrcRowsCount - 1];
+	tBlockWriter.Pack_uint32(uMin);
+	tBlockWriter.Pack_uint32(uMax-uMin);
+
+	EncodeRowsBlock ( m_dRows, uSrcRowsStart, (int)uSrcRowsCount, m_pCodec.get(), m_dBufTmp, tBlockWriter );
+}
+
+template<typename VALUE, bool FLOAT_VALUE>
+void RowWriter_T<VALUE, FLOAT_VALUE>::WriteBlockList ( int iItem, uint32_t uSrcRowsStart, uint32_t uSrcRowsCount, MemWriter_c & tBlockWriter )
+{
+	m_dTypes[iItem] = (uint32_t)Packing_e::ROW_BLOCKS_LIST;
+	m_dRowStart[iItem] = (uint32_t)tBlockWriter.GetPos();
+
+	int iBlocks = (int)( ( uSrcRowsCount + ROWIDS_PER_BLOCK - 1 ) / ROWIDS_PER_BLOCK );
+	// block meta:
+	// number of rowid blocks
+	// min/max of each rowid block
+	tBlockWriter.Pack_uint32(iBlocks);
+
+	m_dMinMax.resize(iBlocks*2);
+	for ( int iBlock=0; iBlock<iBlocks; iBlock++ )
+	{
+		uint32_t uSrcStart = uSrcRowsStart + iBlock*ROWIDS_PER_BLOCK;
+		uint32_t uSrcCount = iBlock<iBlocks-1 ? ROWIDS_PER_BLOCK : (uint32_t)( uSrcRowsCount - ( iBlock * ROWIDS_PER_BLOCK ) );
+
+		m_dMinMax[iBlock*2]		= m_dRows[uSrcStart];
+		m_dMinMax[iBlock*2+1]	= m_dRows[uSrcStart + uSrcCount - 1];
+	}
+
+	EncodeBlock ( m_dMinMax, m_pCodec.get(), m_dBufTmp, tBlockWriter );
+
+	for ( int iBlock=0; iBlock<iBlocks; iBlock++ )
+	{
+		uint32_t uSrcStart = uSrcRowsStart + iBlock*ROWIDS_PER_BLOCK;
+		uint32_t uSrcCount = iBlock<iBlocks-1 ? ROWIDS_PER_BLOCK : (uint32_t)( uSrcRowsCount - ( iBlock * ROWIDS_PER_BLOCK ) );
+
+		EncodeRowsBlock ( m_dRows, uSrcStart, uSrcCount, m_pCodec.get(), m_dBufTmp, tBlockWriter );
+	}
+}
+
+template<typename VALUE, bool FLOAT_VALUE>
+void RowWriter_T<VALUE, FLOAT_VALUE>::ResetData()
+{
+	m_dValues.resize(0);
+	m_dTypes.resize(0);
+	m_dSizes.resize(0);
+	m_dRowStart.resize(0);
+	m_dRows.resize(0);
+	m_dRowsPacked.resize(0);
+}
+
+template<typename VALUE, bool FLOAT_VALUE>
+void RowWriter_T<VALUE, FLOAT_VALUE>::FlushBlock ( FileWriter_c & tWriter )
+{
+	assert ( m_dValues.size()==m_dRowStart.size() );
+	if ( !m_dValues.size() )
+		return;
+
+	const uint32_t iValues = (uint32_t)m_dValues.size();
+	// FIXME!!! set flags: IsValsAsc \ IsValsDesc and CalcDelta with these flags or skip delta encoding
+	//assert ( std::is_sorted ( m_dValues.begin(), m_dValues.end() ) );
+
+	// replace with FLAGS
+	bool bLenDelta = true;
+
+	// FIXME!!! pack per block meta
+
+	// pack rows
+	MemWriter_c tBlockWriter ( m_dRowsPacked );
+	m_dTypes.resize ( iValues );
+	m_dSizes.resize ( iValues );
+	for ( size_t iItem=0; iItem<iValues; iItem++)
+	{
+		uint32_t uSrcRowsStart = m_dRowStart[iItem];
+		size_t uSrcRowsCount = (  iItem+1<m_dRowStart.size() ? m_dRowStart[iItem+1] - uSrcRowsStart : m_dRows.size() - uSrcRowsStart );
+
+		if ( uSrcRowsCount==1 )
+		{
+			WriteSingleRow ( iItem, uSrcRowsStart );
+			bLenDelta = false;
+		}
+		else if ( uSrcRowsCount<=ROWIDS_PER_BLOCK )
+			WriteSingleBlock ( iItem, uSrcRowsStart, uSrcRowsCount, tBlockWriter );
+		else
+			WriteBlockList ( iItem, uSrcRowsStart, uSrcRowsCount, tBlockWriter );
+
+		m_dSizes[iItem] = uSrcRowsCount;
+	}
+
+	// write offset to block into temporary file
+	m_pBlocksOff->Write_uint64 ( tWriter.GetPos() );
+	// write values for PGM builder
+	WriteRawValues ( m_dValues, *m_pPGMVals );
+
+	// write into file
+	EncodeBlock ( m_dValues, m_pCodec.get(), m_dBufTmp, tWriter );
+	EncodeBlockWoDelta ( m_dTypes, m_pCodec.get(), m_dBufTmp, tWriter );
+	EncodeBlockWoDelta ( m_dSizes, m_pCodec.get(), m_dBufTmp, tWriter );
+	tWriter.Write_uint8 ( (uint8_t)bLenDelta );
+	if ( bLenDelta )
+		EncodeBlock ( m_dRowStart, m_pCodec.get(), m_dBufTmp, tWriter );
+	else
+		EncodeBlockWoDelta ( m_dRowStart, m_pCodec.get(), m_dBufTmp, tWriter );
+
+	WriteVector ( m_dRowsPacked, tWriter );
+
+	ResetData();
+}
+
+/////////////////////////////////////////////////////////////////////
 
 static std::array<StrHash_fn, (size_t)Collation_e::TOTAL> g_dCollations;
 uint64_t g_uHashSeed = 0;

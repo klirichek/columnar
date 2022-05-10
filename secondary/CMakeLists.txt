@@ -22,8 +22,8 @@ include ( GetPGM )
 SET ( CMAKE_CXX_STANDARD 17 )
 
 add_library ( secondary_index MODULE
-    builder.cpp iterator.cpp
-    sidx.h common.h builder.h iterator.h )
+    builder.cpp iterator.cpp blockreader.cpp secondary.cpp
+    common.h builder.h iterator.h blockreader.h secondary.h )
 
 target_link_libraries ( secondary_index PUBLIC secondary_root pgmindexlib FastPFOR::FastPFOR util )
 set_target_properties( secondary_index PROPERTIES PREFIX "" OUTPUT_NAME lib_manticore_secondary )
