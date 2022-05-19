@@ -424,15 +424,23 @@ void WriteVectorPacked ( const std::vector<uint64_t> & dData, WRITER & tWriter )
 
 bool FloatEqual ( float fA, float fB );
 
-struct BitVec_t
+class BitVec_c
 {
+public:
+	explicit	BitVec_c ( int iSize );
+
+	bool		BitGet ( int iBit );
+	void		BitSet ( int iBit );
+
+	int			Scan ( int iStart );
+	void		SetAllBits();
+	void		Resize ( int iSize );
+	int			GetLength() const { return m_iSize; }
+	const std::vector<uint32_t> & GetData() const { return m_dData; }
+
+private:
 	std::vector<uint32_t> m_dData;
-	int m_iSize { 0 };
-
-	explicit BitVec_t ( int iSize );
-
-	bool BitGet ( int iBit );
-	void BitSet ( int iBit );
+	int			m_iSize = 0;
 };
 
 /// known collations

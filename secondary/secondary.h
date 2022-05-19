@@ -22,12 +22,6 @@
 
 namespace SI
 {
-	class BlockIteratorSize_i : public columnar::BlockIterator_i
-	{
-	public:
-		virtual uint32_t GetSize() const = 0;
-	};
-
 	struct ColumnInfo_t;
 
 	struct SourceAttrTrait_t
@@ -80,8 +74,8 @@ namespace SI
 		virtual ~Index_i() = default;
 
 		virtual ColumnInfo_t GetColumn ( const char * sName ) const = 0;
-		virtual bool GetValsRows ( const FilterArgs_t & tArgs, std::string & sError, FilterContext_i * pCtx, std::vector<BlockIteratorSize_i *> & dRes ) const = 0;
-		virtual bool GetRangeRows ( const FilterArgs_t & tArgs, std::string & sError, FilterContext_i * pCtx, std::vector<BlockIteratorSize_i *> & dRes ) const = 0;
+		virtual bool GetValsRows ( const FilterArgs_t & tArgs, std::string & sError, FilterContext_i * pCtx, std::vector<columnar::BlockIterator_i *> & dRes ) const = 0;
+		virtual bool GetRangeRows ( const FilterArgs_t & tArgs, std::string & sError, FilterContext_i * pCtx, std::vector<columnar::BlockIterator_i *> & dRes ) const = 0;
 
 		virtual bool SaveMeta ( std::string & sError ) = 0;
 		virtual void ColumnUpdated ( const char * sName ) = 0;

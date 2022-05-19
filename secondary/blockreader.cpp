@@ -109,8 +109,8 @@ public:
 				BlockReader_c ( std::shared_ptr<IntCodec_i> & pCodec, uint64_t uBlockBaseOff, const RowidRange_t & tBounds );
 
 	bool		Open ( const std::string & sFileName, std::string & sError ) override;
-	void		CreateBlocksIterator ( const BlockIter_t & tIt, std::vector<BlockIteratorSize_i *> & dRes ) override;
-	void		CreateBlocksIterator ( const BlockIter_t & tIt, const FilterRange_t & tVal, std::vector<BlockIteratorSize_i *> & dRes ) override { assert ( 0 && "Requesting range iterators from block reader" ); }
+	void		CreateBlocksIterator ( const BlockIter_t & tIt, std::vector<BlockIterator_i *> & dRes ) override;
+	void		CreateBlocksIterator ( const BlockIter_t & tIt, const FilterRange_t & tVal, std::vector<BlockIterator_i *> & dRes ) override { assert ( 0 && "Requesting range iterators from block reader" ); }
 	const std::string & GetWarning() const override { return m_sWarning; }
 
 protected:
@@ -136,8 +136,8 @@ protected:
 	virtual void			LoadValues () = 0;
 	virtual FindValueResult_t FindValue ( uint64_t uRefVal ) const = 0;
 
-	BlockIteratorSize_i *	CreateIterator ( int iItem );
-	int						BlockLoadCreateIterator ( int iBlock, uint64_t uVal, std::vector<BlockIteratorSize_i *> & dRes );
+	BlockIterator_i	*		CreateIterator ( int iItem );
+	int						BlockLoadCreateIterator ( int iBlock, uint64_t uVal, std::vector<BlockIterator_i *> & dRes );
 };
 
 
@@ -157,7 +157,7 @@ bool BlockReader_c::Open ( const std::string & sFileName, std::string & sError )
 }
 
 
-int BlockReader_c::BlockLoadCreateIterator ( int iBlock, uint64_t uVal, std::vector<BlockIteratorSize_i *> & dRes )
+int BlockReader_c::BlockLoadCreateIterator ( int iBlock, uint64_t uVal, std::vector<BlockIterator_i *> & dRes )
 {
 	if ( iBlock!=-1 )
 	{
@@ -173,7 +173,7 @@ int BlockReader_c::BlockLoadCreateIterator ( int iBlock, uint64_t uVal, std::vec
 	return iCmp;
 }
 
-void BlockReader_c::CreateBlocksIterator ( const BlockIter_t & tIt, std::vector<BlockIteratorSize_i *> & dRes )
+void BlockReader_c::CreateBlocksIterator ( const BlockIter_t & tIt, std::vector<BlockIterator_i *> & dRes )
 {
 	m_iStartBlock = tIt.m_iStart;
 
@@ -214,7 +214,7 @@ void BlockReader_c::CreateBlocksIterator ( const BlockIter_t & tIt, std::vector<
 }
 
 
-BlockIteratorSize_i * BlockReader_c::CreateIterator ( int iItem )
+BlockIterator_i * BlockReader_c::CreateIterator ( int iItem )
 {
 	if ( m_iOffPastValues!=-1 )
 	{
@@ -232,7 +232,7 @@ BlockIteratorSize_i * BlockReader_c::CreateIterator ( int iItem )
 			DecodeBlockWoDelta ( m_dRowStart, m_pCodec.get(), m_dBufTmp, *m_pFileReader.get() );
 	}
 
-	return CreateRowidIterator ( (Packing_e)m_dTypes[iItem], m_dRowStart[iItem], m_dSizes[iItem], m_pFileReader, m_pCodec, m_tBounds, m_sWarning.empty(), m_sWarning );
+	return CreateRowidIterator ( (Packing_e)m_dTypes[iItem], m_dRowStart[iItem], m_pFileReader, m_pCodec, m_tBounds, m_sWarning.empty(), m_sWarning );
 }
 
 /////////////////////////////////////////////////////////////////////
@@ -391,8 +391,8 @@ class RangeReader_c : public BlockReader_i
 public:
 				RangeReader_c ( std::shared_ptr<IntCodec_i> & pCodec, uint64_t uBlockBaseOff, const RowidRange_t & tBounds );
 	bool		Open ( const std::string & sFileName, std::string & sError ) override;
-	void		CreateBlocksIterator ( const BlockIter_t & tIt, std::vector<BlockIteratorSize_i *> & dRes ) override { assert ( 0 && "Requesting block iterators from range reader" ); }
-	void		CreateBlocksIterator ( const BlockIter_t & tIt, const FilterRange_t & tVal, std::vector<BlockIteratorSize_i *> & dRes ) override;
+	void		CreateBlocksIterator ( const BlockIter_t & tIt, std::vector<BlockIterator_i *> & dRes ) override { assert ( 0 && "Requesting block iterators from range reader" ); }
+	void		CreateBlocksIterator ( const BlockIter_t & tIt, const FilterRange_t & tVal, std::vector<BlockIterator_i *> & dRes ) override;
 	const std::string & GetWarning() const override { return m_sWarning; }
 
 protected:
@@ -403,7 +403,6 @@ protected:
 	std::shared_ptr<IntCodec_i> m_pCodec { nullptr };
 
 	SpanResizeable_T<uint32_t> m_dTypes;
-	SpanResizeable_T<uint32_t> m_dSizes;
 	SpanResizeable_T<uint32_t> m_dRowStart;
 
 	SpanResizeable_T<uint32_t> m_dBufTmp;
@@ -416,7 +415,7 @@ protected:
 	virtual bool	EvalRangeValue ( int iItem, const FilterRange_t & tRange ) const = 0;
 	virtual int		CmpBlock ( const FilterRange_t & tRange ) const = 0;
 
-	BlockIteratorSize_i * CreateIterator ( int iItem, bool bLoad );
+	BlockIterator_i * CreateIterator ( int iItem, bool bLoad );
 };
 
 
@@ -437,7 +436,7 @@ bool RangeReader_c::Open ( const std::string & sFileName, std::string & sError )
 }
 
 
-void RangeReader_c::CreateBlocksIterator ( const BlockIter_t & tIt, const FilterRange_t & tRange, std::vector<BlockIteratorSize_i *> & dRes )
+void RangeReader_c::CreateBlocksIterator ( const BlockIter_t & tIt, const FilterRange_t & tRange, std::vector<BlockIterator_i *> & dRes )
 {
 	int iBlockCur = tIt.m_iStart;
 	m_pOffReader->Seek ( m_uBlockBaseOff + iBlockCur * sizeof ( uint64_t) );
@@ -533,12 +532,11 @@ void RangeReader_c::CreateBlocksIterator ( const BlockIter_t & tIt, const Filter
 }
 
 
-BlockIteratorSize_i * RangeReader_c::CreateIterator ( int iItem, bool bLoad )
+BlockIterator_i * RangeReader_c::CreateIterator ( int iItem, bool bLoad )
 {
 	if ( bLoad )
 	{
 		DecodeBlockWoDelta ( m_dTypes, m_pCodec.get(), m_dBufTmp, *m_pBlockReader.get() );
-		DecodeBlockWoDelta ( m_dSizes, m_pCodec.get(), m_dBufTmp, *m_pBlockReader.get() );
 
 		bool bLenDelta = !!m_pBlockReader->Read_uint8();
 		if ( bLenDelta )
@@ -547,7 +545,7 @@ BlockIteratorSize_i * RangeReader_c::CreateIterator ( int iItem, bool bLoad )
 			DecodeBlockWoDelta ( m_dRowStart, m_pCodec.get(), m_dBufTmp, *m_pBlockReader.get() );
 	}
 
-	return CreateRowidIterator ( (Packing_e)m_dTypes[iItem], m_dRowStart[iItem], m_dSizes[iItem], m_pBlockReader, m_pCodec, m_tBounds, m_sWarning.empty(), m_sWarning );
+	return CreateRowidIterator ( (Packing_e)m_dTypes[iItem], m_dRowStart[iItem], m_pBlockReader, m_pCodec, m_tBounds, m_sWarning.empty(), m_sWarning );
 }
 
 /////////////////////////////////////////////////////////////////////

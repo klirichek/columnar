@@ -293,17 +293,14 @@ bool FloatEqual ( float fA, float fB )
     return std::fabs ( fA - fB )<=std::numeric_limits<float>::epsilon();
 }
 
-BitVec_t::BitVec_t ( int iSize )
+
+BitVec_c::BitVec_c ( int iSize )
 {
-	m_iSize = iSize;
-	if ( iSize )
-	{
-		int iCount = ( iSize+31 )/32;
-		m_dData = std::vector<uint32_t> ( iCount, 0 );
-	}
+	Resize(iSize);
 }
 
-bool BitVec_t::BitGet ( int iBit )
+
+bool BitVec_c::BitGet ( int iBit )
 {
 	if ( !m_dData.size() )
 		return false;
@@ -312,12 +309,61 @@ bool BitVec_t::BitGet ( int iBit )
 	return ( ( m_dData [ iBit>>5 ] & ( ( (uint32_t)1 )<<( iBit&31 ) ) )!=0 );
 }
 
-void BitVec_t::BitSet ( int iBit )
+
+void BitVec_c::BitSet ( int iBit )
 {
 	if ( m_dData.size() )
 	{
 		assert ( iBit>=0 && iBit<m_iSize );
 		m_dData [ iBit>>5 ] |= ( ( (uint32_t)1 )<<( iBit&31 ) );
+	}
+}
+
+
+static inline int ScanBit ( uint32_t uData, int iStart )
+{
+	for ( int i = iStart; i < 32; i++ )
+		if ( uData & ( uint32_t(1)<<i ) )
+			return i;
+
+	return -1;
+}
+
+
+int BitVec_c::Scan ( int iStart )
+{
+	assert ( iStart<m_iSize );
+
+	uint32_t * pData = &m_dData.front();
+	int iIndex = iStart>>5;
+	uint32_t uMask = ~( ( 1<<( iStart&31 ) )-1 );
+	if ( pData[iIndex] & uMask )
+		return (iIndex<<5) + ScanBit ( pData[iIndex], iStart&31 );
+
+	iIndex++;
+	while ( iIndex<(int)m_dData.size() && !pData[iIndex] )
+		iIndex++;
+
+	if ( iIndex>=(int)m_dData.size() )
+		return m_iSize;
+
+	return (iIndex<<5) + ScanBit ( pData[iIndex], 0 );
+}
+
+
+void BitVec_c::SetAllBits()
+{
+	std::fill ( m_dData.begin(), m_dData.end(), 0xffffffff );
+}
+
+
+void BitVec_c::Resize ( int iSize )
+{
+	m_iSize = iSize;
+	if ( iSize )
+	{
+		int iCount = ( iSize+31 )/32;
+		m_dData = std::vector<uint32_t> ( iCount, 0 );
 	}
 }
 

@@ -33,8 +33,8 @@ class SecondaryIndex_c : public Index_i
 public:
 	bool Setup ( const std::string & sFile, std::string & sError );
 	ColumnInfo_t GetColumn ( const char * sName ) const override;
-	bool GetValsRows ( const FilterArgs_t & tArgs, std::string & sError, FilterContext_i * pCtx, std::vector<BlockIteratorSize_i *> & dRes ) const override;
-	bool GetRangeRows ( const FilterArgs_t & tArgs, std::string & sError, FilterContext_i * pCtx, std::vector<BlockIteratorSize_i *> & dRes ) const override;
+	bool GetValsRows ( const FilterArgs_t & tArgs, std::string & sError, FilterContext_i * pCtx, std::vector<columnar::BlockIterator_i *> & dRes ) const override;
+	bool GetRangeRows ( const FilterArgs_t & tArgs, std::string & sError, FilterContext_i * pCtx, std::vector<columnar::BlockIterator_i *> & dRes ) const override;
 
 	bool SaveMeta ( std::string & sError ) override;
 	void ColumnUpdated ( const char * sName ) override;
@@ -88,8 +88,8 @@ bool SecondaryIndex_c::Setup ( const std::string & sFile, std::string & sError )
 	m_uNextMetaOff = tReader.Read_uint64();
 	int iAttrsCount = tReader.Read_uint32();
 
-	BitVec_t dAttrsEnabled ( iAttrsCount );
-	ReadVectorData ( dAttrsEnabled.m_dData, tReader );
+	BitVec_c dAttrsEnabled ( iAttrsCount );
+	ReadVectorData ( dAttrsEnabled.GetData(), tReader );
 
 	m_sCompressionUINT32 = tReader.Read_string();
 	m_sCompressionUINT64 = tReader.Read_string();
@@ -183,7 +183,7 @@ bool SecondaryIndex_c::SaveMeta ( std::string & sError )
 	if ( !m_bUpdated || !m_dAttrs.size() )
 		return true;
 
-	BitVec_t dAttrEnabled ( m_dAttrs.size() );
+	BitVec_c dAttrEnabled ( m_dAttrs.size() );
 	for ( int i=0; i<m_dAttrs.size(); i++ )
 	{
 		const ColumnInfo_t & tAttr = m_dAttrs[i];
@@ -197,7 +197,7 @@ bool SecondaryIndex_c::SaveMeta ( std::string & sError )
 
 	// seek to meta offset and skip attrbutes count
 	tDstFile.Seek ( m_uMetaOff + sizeof(uint64_t) + sizeof(uint32_t) );
-	WriteVector ( dAttrEnabled.m_dData, tDstFile );
+	WriteVector ( dAttrEnabled.GetData(), tDstFile );
 	return true;
 }
 	
@@ -240,7 +240,7 @@ FilterContext_i * SecondaryIndex_c::CreateFilterContext () const
 }
 
 
-bool SecondaryIndex_c::GetValsRows ( const FilterArgs_t & tArgs, std::string & sError, FilterContext_i * pCtx, std::vector<BlockIteratorSize_i *> & dRes ) const
+bool SecondaryIndex_c::GetValsRows ( const FilterArgs_t & tArgs, std::string & sError, FilterContext_i * pCtx, std::vector<columnar::BlockIterator_i *> & dRes ) const
 {
 	const ColumnInfo_t & tCol = tArgs.m_tCol;
 	const Span_T<uint64_t> & dVals = tArgs.m_dVals;
@@ -281,7 +281,7 @@ bool SecondaryIndex_c::GetValsRows ( const FilterArgs_t & tArgs, std::string & s
 }
 
 
-bool SecondaryIndex_c::GetRangeRows ( const FilterArgs_t & tArgs, std::string & sError, FilterContext_i * pCtx, std::vector<BlockIteratorSize_i *> & dRes ) const
+bool SecondaryIndex_c::GetRangeRows ( const FilterArgs_t & tArgs, std::string & sError, FilterContext_i * pCtx, std::vector<BlockIterator_i *> & dRes ) const
 {
 	const ColumnInfo_t & tCol = tArgs.m_tCol;
 	const FilterRange_t & tVal = tArgs.m_tRange;

@@ -151,7 +151,7 @@ struct RawWriter_T : public RawWriter_i
 	SIWriter_i * GetWriter ( std::string & sError ) final;
 };
 
-static const std::string g_sCompressionUINT32 = "simdfastpfor128";
+static const std::string g_sCompressionUINT32 = "streamvbyte";
 static const std::string g_sCompressionUINT64 = "fastpfor128";
 
 class Builder_c final : public Builder_i
@@ -343,9 +343,8 @@ bool Builder_c::Done ( std::string & sError )
 
 	int64_t iLastBlock = tTmpBlocks.GetPos();
 	for ( size_t iBlock=1; iBlock<dBlocksCount.size(); iBlock++ )
-	{
 		dBlocksCount[iBlock-1] = ( dBlocksOffStart[iBlock] - dBlocksOffStart[iBlock-1] ) / sizeof ( dBlocksOffStart[iBlock] );
-	}
+
 	dBlocksCount.back() = ( iLastBlock - dBlocksOffStart.back() ) / sizeof ( dBlocksOffStart.back() );
 
 	// meta
@@ -379,15 +378,14 @@ bool Builder_c::WriteMeta ( const std::string & sPgmName, const std::string & sB
 		tDstFile.Write_uint64 ( uNextMeta ); // link to next meta
 		tDstFile.Write_uint32 ( (int)m_dAttrs.size() );
 		
-		BitVec_t dAttrsEnabled ( m_dAttrs.size() );
-		std::fill ( dAttrsEnabled.m_dData.begin(), dAttrsEnabled.m_dData.end(), 0xffffffff );
-		WriteVector ( dAttrsEnabled.m_dData, tDstFile );
+		BitVec_c dAttrsEnabled ( m_dAttrs.size() );
+		dAttrsEnabled.SetAllBits();
+		WriteVector ( dAttrsEnabled.GetData(), tDstFile );
 
 		tDstFile.Write_string ( g_sCompressionUINT32 );
 		tDstFile.Write_string ( g_sCompressionUINT64 );
 		tDstFile.Write_uint32 ( (uint32_t)m_eCollation );
 		tDstFile.Write_uint32 ( VALUES_PER_BLOCK );
-		tDstFile.Write_uint32 ( ROWIDS_PER_BLOCK );
 		
 		// write schema
 		for ( const auto & tInfo : m_dAttrs )
@@ -712,7 +710,7 @@ RawValue_T<uint64_t> Convert ( const BinValue_T<uint64_t> & tSrc )
 }
 
 template<typename VEC>
-static void EncodeRowsBlock ( VEC & dSrcRows, uint32_t iOff, uint32_t iCount, IntCodec_i * pCodec, std::vector<uint32_t> & dBufRows, MemWriter_c & tWriter )
+static void EncodeRowsBlock ( VEC & dSrcRows, uint32_t iOff, uint32_t iCount, IntCodec_i * pCodec, std::vector<uint32_t> & dBufRows, MemWriter_c & tWriter, bool bWriteSize )
 {
 	Span_T<uint32_t> dRows ( dSrcRows.data() + iOff, iCount );
 	if ( FastPForLib::needPaddingTo128Bits( dRows.begin() ) )
@@ -725,10 +723,10 @@ static void EncodeRowsBlock ( VEC & dSrcRows, uint32_t iOff, uint32_t iCount, In
 	ComputeDeltas ( dRows.data(), (int)dRows.size(), true );
 	pCodec->Encode ( dRows, dBufRows );
 
-	// block meta
-	// [block-size]
-	// [packed block]
-	WriteVectorLen32 ( dBufRows, tWriter );
+	if ( bWriteSize )
+		WriteVectorLen32 ( dBufRows, tWriter );
+	else
+		WriteVector ( dBufRows, tWriter );
 }
 
 template<typename VEC, typename WRITER>
@@ -783,13 +781,14 @@ public:
 private:
 	std::vector<VALUE>		m_dValues;
 	std::vector<uint32_t>	m_dTypes;
-	std::vector<uint32_t>	m_dSizes;
 	std::vector<uint32_t>	m_dRowStart;
 	std::vector<uint32_t>	m_dRows;
 	std::vector<uint32_t>	m_dMinMax;
+	std::vector<uint32_t>	m_dBlockOffsets;
 
 	std::vector<uint32_t>	m_dBufTmp;
 	std::vector<uint8_t>	m_dRowsPacked;
+	std::vector<uint8_t>	m_dTmp;
 	VALUE					m_tLastValue { 0 };
 
 	std::unique_ptr<IntCodec_i>	m_pCodec { nullptr };
@@ -850,7 +849,7 @@ void RowWriter_T<VALUE, FLOAT_VALUE>::NextValue ( const RawValue_T<VALUE> & tBin
 template<typename VALUE, bool FLOAT_VALUE>
 void RowWriter_T<VALUE, FLOAT_VALUE>::FlushValue ( FileWriter_c & tWriter )
 {
-	if ( m_dValues.size()<ROWIDS_PER_BLOCK )
+	if ( m_dValues.size()<VALUES_PER_BLOCK )
 		return;
 
 	FlushBlock ( tWriter );
@@ -874,7 +873,7 @@ void RowWriter_T<VALUE, FLOAT_VALUE>::WriteSingleBlock ( int iItem, uint32_t uSr
 	tBlockWriter.Pack_uint32(uMin);
 	tBlockWriter.Pack_uint32(uMax-uMin);
 
-	EncodeRowsBlock ( m_dRows, uSrcRowsStart, (int)uSrcRowsCount, m_pCodec.get(), m_dBufTmp, tBlockWriter );
+	EncodeRowsBlock ( m_dRows, uSrcRowsStart, (int)uSrcRowsCount, m_pCodec.get(), m_dBufTmp, tBlockWriter, true );
 }
 
 template<typename VALUE, bool FLOAT_VALUE>
@@ -884,11 +883,6 @@ void RowWriter_T<VALUE, FLOAT_VALUE>::WriteBlockList ( int iItem, uint32_t uSrcR
 	m_dRowStart[iItem] = (uint32_t)tBlockWriter.GetPos();
 
 	int iBlocks = (int)( ( uSrcRowsCount + ROWIDS_PER_BLOCK - 1 ) / ROWIDS_PER_BLOCK );
-	// block meta:
-	// number of rowid blocks
-	// min/max of each rowid block
-	tBlockWriter.Pack_uint32(iBlocks);
-
 	m_dMinMax.resize(iBlocks*2);
 	for ( int iBlock=0; iBlock<iBlocks; iBlock++ )
 	{
@@ -901,13 +895,23 @@ void RowWriter_T<VALUE, FLOAT_VALUE>::WriteBlockList ( int iItem, uint32_t uSrcR
 
 	EncodeBlock ( m_dMinMax, m_pCodec.get(), m_dBufTmp, tBlockWriter );
 
+	// encode blocks to temporary memory storage
+	m_dBlockOffsets.resize(iBlocks);
+	m_dTmp.resize(0);
+	MemWriter_c tTmpWriter ( m_dTmp );
 	for ( int iBlock=0; iBlock<iBlocks; iBlock++ )
 	{
 		uint32_t uSrcStart = uSrcRowsStart + iBlock*ROWIDS_PER_BLOCK;
 		uint32_t uSrcCount = iBlock<iBlocks-1 ? ROWIDS_PER_BLOCK : (uint32_t)( uSrcRowsCount - ( iBlock * ROWIDS_PER_BLOCK ) );
 
-		EncodeRowsBlock ( m_dRows, uSrcStart, uSrcCount, m_pCodec.get(), m_dBufTmp, tBlockWriter );
+		EncodeRowsBlock ( m_dRows, uSrcStart, uSrcCount, m_pCodec.get(), m_dBufTmp, tTmpWriter, false );
+		int64_t iPos = tTmpWriter.GetPos();
+		assert ( !(iPos % 4) );
+		m_dBlockOffsets[iBlock] = iPos>>2;
 	}
+
+	EncodeBlock ( m_dBlockOffsets, m_pCodec.get(), m_dBufTmp, tBlockWriter );
+	tBlockWriter.Write ( &m_dTmp.front(), m_dTmp.size()  );
 }
 
 template<typename VALUE, bool FLOAT_VALUE>
@@ -915,10 +919,12 @@ void RowWriter_T<VALUE, FLOAT_VALUE>::ResetData()
 {
 	m_dValues.resize(0);
 	m_dTypes.resize(0);
-	m_dSizes.resize(0);
 	m_dRowStart.resize(0);
 	m_dRows.resize(0);
 	m_dRowsPacked.resize(0);
+	m_dTmp.resize(0);
+	m_dMinMax.resize(0);
+	m_dBlockOffsets.resize(0);
 }
 
 template<typename VALUE, bool FLOAT_VALUE>
@@ -940,7 +946,6 @@ void RowWriter_T<VALUE, FLOAT_VALUE>::FlushBlock ( FileWriter_c & tWriter )
 	// pack rows
 	MemWriter_c tBlockWriter ( m_dRowsPacked );
 	m_dTypes.resize ( iValues );
-	m_dSizes.resize ( iValues );
 	for ( size_t iItem=0; iItem<iValues; iItem++)
 	{
 		uint32_t uSrcRowsStart = m_dRowStart[iItem];
@@ -955,8 +960,6 @@ void RowWriter_T<VALUE, FLOAT_VALUE>::FlushBlock ( FileWriter_c & tWriter )
 			WriteSingleBlock ( iItem, uSrcRowsStart, uSrcRowsCount, tBlockWriter );
 		else
 			WriteBlockList ( iItem, uSrcRowsStart, uSrcRowsCount, tBlockWriter );
-
-		m_dSizes[iItem] = uSrcRowsCount;
 	}
 
 	// write offset to block into temporary file
@@ -967,7 +970,6 @@ void RowWriter_T<VALUE, FLOAT_VALUE>::FlushBlock ( FileWriter_c & tWriter )
 	// write into file
 	EncodeBlock ( m_dValues, m_pCodec.get(), m_dBufTmp, tWriter );
 	EncodeBlockWoDelta ( m_dTypes, m_pCodec.get(), m_dBufTmp, tWriter );
-	EncodeBlockWoDelta ( m_dSizes, m_pCodec.get(), m_dBufTmp, tWriter );
 	tWriter.Write_uint8 ( (uint8_t)bLenDelta );
 	if ( bLenDelta )
 		EncodeBlock ( m_dRowStart, m_pCodec.get(), m_dBufTmp, tWriter );

@@ -18,6 +18,7 @@
 
 #include "common.h"
 #include "util/codec.h"
+#include "util/blockiterator.h"
 #include <memory>
 
 namespace SI
@@ -47,8 +48,8 @@ public:
 	virtual			~BlockReader_i() = default;
 
 	virtual bool	Open ( const std::string & sFileName, std::string & sError ) = 0;
-	virtual void	CreateBlocksIterator ( const BlockIter_t & tIt, std::vector<BlockIteratorSize_i *> & dRes ) = 0;
-	virtual void	CreateBlocksIterator ( const BlockIter_t & tIt, const FilterRange_t & tVal, std::vector<BlockIteratorSize_i *> & dRes ) = 0;
+	virtual void	CreateBlocksIterator ( const BlockIter_t & tIt, std::vector<columnar::BlockIterator_i *> & dRes ) = 0;
+	virtual void	CreateBlocksIterator ( const BlockIter_t & tIt, const FilterRange_t & tVal, std::vector<columnar::BlockIterator_i *> & dRes ) = 0;
 	virtual const std::string & GetWarning() const = 0;
 };
 

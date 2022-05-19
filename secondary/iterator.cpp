@@ -26,55 +26,59 @@ using namespace columnar;
 
 static const int g_iBlocksReaderBufSize { 1024 };
 
-class RowidIterator_c : public BlockIteratorSize_i
+class RowidIterator_c : public columnar::BlockIterator_i
 {
 public:
-				RowidIterator_c ( Packing_e eType, uint64_t uRowStart, uint32_t uSize, std::shared_ptr<columnar::FileReader_c> & pReader, std::shared_ptr<IntCodec_i> & pCodec, const RowidRange_t & tBounds );
+				RowidIterator_c ( Packing_e eType, uint64_t uRowStart, std::shared_ptr<columnar::FileReader_c> & pReader, std::shared_ptr<IntCodec_i> & pCodec, const RowidRange_t & tBounds );
 
 	bool		HintRowID ( uint32_t tRowID ) override;
 	bool		GetNextRowIdBlock ( Span_T<uint32_t> & dRowIdBlock ) override;
 	int64_t		GetNumProcessed() const override;
-	uint32_t	GetSize() const override { return m_uSize; }
 
 private:
 	Packing_e			m_eType = Packing_e::TOTAL;
 	uint64_t			m_uRowStart = 0;
-	uint32_t			m_uSize = 0;
 	std::shared_ptr<columnar::FileReader_c> m_pReader { nullptr };
 	std::shared_ptr<IntCodec_i>	m_pCodec { nullptr };
-	uint64_t			m_uLastOff = 0;
-	const RowidRange_t m_tBounds;
+	int64_t				m_iMetaOffset = 0;
+	int64_t				m_iDataOffset = 0;
+	const RowidRange_t	m_tBounds;
 
 	bool				m_bStarted = false;
 	bool				m_bStopped = false;
 
 	uint32_t			m_uRowMin = 0;
 	uint32_t			m_uRowMax = 0;
-	uint32_t			m_uCurBlock = 0;
-	uint32_t			m_uBlocksCount = 0;
-	SpanResizeable_T<uint32_t>	m_dRowsDecoded;
-	std::vector<uint32_t>		m_dRowsRaw;
+	int					m_iCurBlock = 0;
+	SpanResizeable_T<uint32_t>	m_dRows;
+	SpanResizeable_T<uint32_t>	m_dMinMax;
+	SpanResizeable_T<uint32_t>	m_dBlockOffsets;
+	SpanResizeable_T<uint32_t>	m_dTmp;
+	BitVec_c			m_dMatchingBlocks{0};
 
 	bool	StartBlock ( Span_T<uint32_t> & dRowIdBlock );
 	bool	NextBlock ( Span_T<uint32_t> & dRowIdBlock );
-	void	DecodeRowsBlock();
+
+	void	DecodeDeltaVector ( SpanResizeable_T<uint32_t> & dDecoded );
+	void	MarkMatchingBlocks();
 };
 
 
-RowidIterator_c::RowidIterator_c ( Packing_e eType, uint64_t uRowStart, uint32_t uSize, std::shared_ptr<columnar::FileReader_c> & pReader, std::shared_ptr<IntCodec_i> & pCodec, const RowidRange_t & tBounds )
+RowidIterator_c::RowidIterator_c ( Packing_e eType, uint64_t uRowStart, std::shared_ptr<columnar::FileReader_c> & pReader, std::shared_ptr<IntCodec_i> & pCodec, const RowidRange_t & tBounds )
 	: m_eType ( eType )
 	, m_uRowStart ( uRowStart )
-	, m_uSize ( uSize )
 	, m_pReader ( pReader )
 	, m_pCodec ( pCodec )
 	, m_tBounds ( tBounds )
 {
-	m_uLastOff = m_pReader->GetPos();
+	m_iMetaOffset = m_pReader->GetPos();
 }
 
 
 bool RowidIterator_c::HintRowID ( uint32_t tRowID )
 {
+	//assert ( 0 && "NIY" );
+	// implement proper rewinding in all packings
 	return !m_bStopped;
 }
 
@@ -96,6 +100,22 @@ int64_t	RowidIterator_c::GetNumProcessed() const
 }
 
 
+void RowidIterator_c::MarkMatchingBlocks()
+{
+	m_dMatchingBlocks.Resize ( m_dBlockOffsets.size() );
+	if ( !m_tBounds.m_bHasRange )
+	{
+		m_dMatchingBlocks.SetAllBits();
+		return;
+	}
+
+	Interval_T<uint32_t> tRowidBounds ( m_tBounds.m_uMin, m_tBounds.m_uMax );
+	for ( size_t i = 0; i < m_dBlockOffsets.size(); i++ )
+		if ( tRowidBounds.Overlaps ( { m_dMinMax[i<<1], m_dMinMax[(i<<1)+1] } ) )
+			m_dMatchingBlocks.BitSet(i);
+}
+
+
 bool RowidIterator_c::StartBlock ( Span_T<uint32_t> & dRowIdBlock )
 {
 	m_bStarted = true;
@@ -106,36 +126,42 @@ bool RowidIterator_c::StartBlock ( Span_T<uint32_t> & dRowIdBlock )
 		m_uRowMin = m_uRowMax = m_uRowStart;
 		if ( !m_tBounds.m_bHasRange || ( m_tBounds.m_uMin<=m_uRowStart && m_uRowStart<=m_tBounds.m_uMax ) )
 		{
-			m_dRowsDecoded.resize ( 1 );
-			m_dRowsDecoded[0] = m_uRowStart;
+			m_dRows.resize(1);
+			m_dRows[0] = m_uRowStart;
 		}
 		break;
 
 	case Packing_e::ROW_BLOCK:
-		m_pReader->Seek ( m_uLastOff + m_uRowStart );
+		m_pReader->Seek ( m_iMetaOffset + m_uRowStart );
 		// FIXME!!! block length larger dRowIdBlock
 		m_bStopped = true;
-		DecodeRowsBlock();
+		m_uRowMin = m_pReader->Unpack_uint32();
+		m_uRowMax = m_pReader->Unpack_uint32() + m_uRowMin;
+		DecodeDeltaVector ( m_dRows );
 		break;
 
 	case Packing_e::ROW_BLOCKS_LIST:
-		m_pReader->Seek ( m_uLastOff + m_uRowStart );
-		// FIXME!!! block length larger dRowIdBlock
-		m_uCurBlock = 1;
-		m_uBlocksCount = m_pReader->Unpack_uint32();
-		DecodeRowsBlock();
-		dRowIdBlock = Span_T<uint32_t> ( m_dRowsDecoded );
-		// decode could produce empty block in case it out of @rowid range
-		while ( !m_bStopped && dRowIdBlock.empty() )
-			NextBlock ( dRowIdBlock );
-		break;
+		m_pReader->Seek ( m_iMetaOffset + m_uRowStart );
+		DecodeDeltaVector ( m_dMinMax );
+		DecodeDeltaVector ( m_dBlockOffsets );
+		m_iDataOffset = m_pReader->GetPos();
+
+		MarkMatchingBlocks();
+		if ( !m_dMatchingBlocks.GetLength() )
+		{
+			m_bStopped = true;
+			return false;
+		}
+
+		m_iCurBlock = 0;
+		return NextBlock(dRowIdBlock);
 
 	default:				// FIXME!!! handle ROW_FULLSCAN
 		m_bStopped = true;
 		break;
 	}
 
-	dRowIdBlock = Span_T<uint32_t> ( m_dRowsDecoded );
+	dRowIdBlock = Span_T<uint32_t> ( m_dRows );
 	return ( !dRowIdBlock.empty() );
 }
 
@@ -145,51 +171,48 @@ bool RowidIterator_c::NextBlock ( Span_T<uint32_t> & dRowIdBlock )
 	assert ( m_bStarted && !m_bStopped );
 	assert ( m_eType==Packing_e::ROW_BLOCKS_LIST );
 
-	if ( m_uCurBlock>=m_uBlocksCount )
+	if ( m_iCurBlock>=m_dMatchingBlocks.GetLength() )
 	{
 		m_bStopped = true;
 		return false;
 	}
 
-	m_uCurBlock++;
-	// reader is shared among multiple blocks - need to keep offset after last operation
-	m_pReader->Seek ( m_uLastOff );
-	DecodeRowsBlock();
-	dRowIdBlock = Span_T<uint32_t> ( m_dRowsDecoded );
+	m_iCurBlock = m_dMatchingBlocks.Scan(m_iCurBlock);
+	if ( m_iCurBlock>=m_dMatchingBlocks.GetLength() )
+	{
+		m_bStopped = true;
+		return false;
+	}
 
+	int64_t iBlockSize = m_dBlockOffsets[m_iCurBlock];
+	int64_t iBlockOffset = m_iCurBlock ? ( m_dBlockOffsets[m_iCurBlock-1]): 0;
+	iBlockSize -= iBlockOffset;
+
+	m_pReader->Seek ( m_iDataOffset + ( iBlockOffset << 2 ) );
+
+	m_dTmp.resize(iBlockSize);
+	ReadVectorData ( m_dTmp, *m_pReader );
+	m_pCodec->Decode ( m_dTmp, m_dRows );
+	ComputeInverseDeltas ( m_dRows, true );
+
+	m_iCurBlock++;
+
+	dRowIdBlock = Span_T<uint32_t>(m_dRows);
 	return ( !dRowIdBlock.empty() );
 }
 
 
-void RowidIterator_c::DecodeRowsBlock()
+void RowidIterator_c::DecodeDeltaVector ( SpanResizeable_T<uint32_t> & dDecoded )
 {
-	m_dRowsRaw.resize ( 0 );
-	m_dRowsDecoded.resize ( 0 );
-
-	m_uRowMin = m_pReader->Unpack_uint32();
-	m_uRowMax = m_pReader->Unpack_uint32() + m_uRowMin;
-
-	// should rows block be skipped or unpacked
-	Interval_T<uint32_t> tBlockRange ( m_uRowMin, m_uRowMax );
-	Interval_T<uint32_t> tRowidBounds ( m_tBounds.m_uMin, m_tBounds.m_uMax );
-	if ( m_tBounds.m_bHasRange && !tRowidBounds.Overlaps ( tBlockRange ) )
-	{
-		uint32_t uLen =  m_pReader->Unpack_uint32();
-		m_uLastOff = m_pReader->GetPos() + sizeof ( m_dRowsRaw[0] ) * uLen;
-		return;
-	}
-
-	ReadVectorLen32 ( m_dRowsRaw, *m_pReader );
-		
-	m_pCodec->Decode ( m_dRowsRaw, m_dRowsDecoded );
-	ComputeInverseDeltas ( m_dRowsDecoded, true );
-
-	m_uLastOff = m_pReader->GetPos();
+	m_dTmp.resize(0);
+	ReadVectorLen32 ( m_dTmp, *m_pReader );
+	m_pCodec->Decode ( m_dTmp, dDecoded );
+	ComputeInverseDeltas ( dDecoded, true );
 }
 
 /////////////////////////////////////////////////////////////////////
 
-BlockIteratorSize_i * CreateRowidIterator ( Packing_e eType, uint64_t uRowStart, uint32_t uSize, std::shared_ptr<columnar::FileReader_c> & pReader, std::shared_ptr<IntCodec_i> & pCodec, const RowidRange_t & tBounds, bool bCreateReader, std::string & sError )
+columnar::BlockIterator_i * CreateRowidIterator ( Packing_e eType, uint64_t uRowStart, std::shared_ptr<columnar::FileReader_c> & pReader, std::shared_ptr<IntCodec_i> & pCodec, const RowidRange_t & tBounds, bool bCreateReader, std::string & sError )
 {
 	std::shared_ptr<columnar::FileReader_c> tBlocksReader { nullptr };
 	if ( bCreateReader && eType==Packing_e::ROW_BLOCKS_LIST )
@@ -201,7 +224,7 @@ BlockIteratorSize_i * CreateRowidIterator ( Packing_e eType, uint64_t uRowStart,
 			tBlocksReader->Seek ( pReader->GetPos() );
 	}
 
-	return new RowidIterator_c ( eType, uRowStart, uSize, ( tBlocksReader ? tBlocksReader : pReader ), pCodec, tBounds );
+	return new RowidIterator_c ( eType, uRowStart, ( tBlocksReader ? tBlocksReader : pReader ), pCodec, tBounds );
 }
 
 }
