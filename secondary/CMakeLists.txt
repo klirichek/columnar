@@ -1,4 +1,4 @@
-# Copyright (c) 2020-2021, Manticore Software LTD (https://manticoresearch.com)
+# Copyright (c) 2020-2022, Manticore Software LTD (https://manticoresearch.com)
 # All rights reserved
 #
 #
@@ -25,7 +25,7 @@ add_library ( secondary_index MODULE
     builder.cpp iterator.cpp blockreader.cpp secondary.cpp
     common.h builder.h iterator.h blockreader.h secondary.h )
 
-target_link_libraries ( secondary_index PUBLIC secondary_root pgmindexlib FastPFOR::FastPFOR util )
+target_link_libraries ( secondary_index PUBLIC secondary_root pgmindexlib FastPFOR::FastPFOR util common )
 set_target_properties( secondary_index PROPERTIES PREFIX "" OUTPUT_NAME lib_manticore_secondary )
 
 # runaround - POSITION_INDEPENDENT_CODE must be transitive from secondary_root, but it doesn't work (a bug in cmake?)

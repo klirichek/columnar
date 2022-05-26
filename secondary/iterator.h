@@ -18,8 +18,8 @@
 
 #include "util/reader.h"
 #include "util/codec.h"
-#include "util/filter.h"
-#include "util/blockiterator.h"
+#include "common/filter.h"
+#include "common/blockiterator.h"
 #include "common.h"
 #include "builder.h"
 #include <memory>

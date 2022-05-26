@@ -18,7 +18,7 @@
 
 #include "common.h"
 #include "util/util.h"
-#include "util/schema.h"
+#include "common/schema.h"
 
 namespace SI
 {

@@ -16,22 +16,20 @@
 
 #pragma once
 
-#include "util.h"
+#include "util/util.h"
 
-namespace columnar
+namespace common
 {
 
-enum class BoolPacking_e : uint32_t
+class BlockIterator_i
 {
-	CONST,
-	BITMAP,
+public:
+	virtual				~BlockIterator_i() = default;
 
-	TOTAL
+	virtual bool		HintRowID ( uint32_t tRowID ) = 0;
+	virtual bool		GetNextRowIdBlock ( util::Span_T<uint32_t> & dRowIdBlock ) = 0;
+	virtual int64_t		GetNumProcessed() const = 0;
 };
 
 
-class Packer_i;
-struct Settings_t;
-Packer_i * CreatePackerBool ( const Settings_t & tSettings, const std::string & sName );
-
-} // namespace columnar
+} // namespace common

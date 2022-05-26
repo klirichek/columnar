@@ -1,4 +1,4 @@
-// Copyright (c) 2020-2021, Manticore Software LTD (https://manticoresearch.com)
+// Copyright (c) 2020-2022, Manticore Software LTD (https://manticoresearch.com)
 // All rights reserved
 //
 //
@@ -19,7 +19,7 @@
 #include <string>
 #include <array>
 
-#include "util/schema.h"
+#include "common/schema.h"
 
 namespace SI
 {

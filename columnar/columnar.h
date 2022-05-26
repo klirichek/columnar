@@ -1,4 +1,4 @@
-// Copyright (c) 2020-2021, Manticore Software LTD (https://manticoresearch.com)
+// Copyright (c) 2020-2022, Manticore Software LTD (https://manticoresearch.com)
 // All rights reserved
 //
 //
@@ -17,9 +17,9 @@
 #pragma once
 
 #include "util/util.h"
-#include "util/blockiterator.h"
-#include "util/filter.h"
-#include "util/schema.h"
+#include "common/blockiterator.h"
+#include "common/filter.h"
+#include "common/schema.h"
 #include <functional>
 
 namespace util

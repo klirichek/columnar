@@ -15,7 +15,7 @@
 // limitations under the License.
 
 #include "filter.h"
-#include "util.h"
+#include "util/util.h"
 
 namespace common
 {

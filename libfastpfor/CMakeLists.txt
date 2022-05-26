@@ -2,7 +2,7 @@
 # Apache License Version 2.0 http://www.apache.org/licenses/.
 #
 # Copyright (c) 2012 Louis Dionne
-# Copyright (c) 2021 Manticore Software LTD
+# Copyright (c) 2021-2022 Manticore Software LTD
 #
 cmake_minimum_required(VERSION 3.17)
 

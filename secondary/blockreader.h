@@ -18,8 +18,8 @@
 
 #include "common.h"
 #include "util/codec.h"
-#include "util/filter.h"
-#include "util/blockiterator.h"
+#include "common/filter.h"
+#include "common/blockiterator.h"
 #include <memory>
 
 namespace SI

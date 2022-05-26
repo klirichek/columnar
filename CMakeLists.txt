@@ -1,4 +1,4 @@
-# Copyright (c) 2020-2021, Manticore Software LTD (https://manticoresearch.com)
+# Copyright (c) 2020-2022, Manticore Software LTD (https://manticoresearch.com)
 # All rights reserved
 #
 #
@@ -126,13 +126,15 @@ if (TARGET FastPFOR::FastPFOR)
 	target_compile_options ( secondary_root INTERFACE $<${MSCXX}:-D_CRT_SECURE_NO_WARNINGS -D_CRT_NONSTDC_NO_WARNINGS> )
 
 	target_link_libraries ( columnar_root INTERFACE columnar_api )
-	target_include_directories ( columnar_root INTERFACE columnar util )
+	target_include_directories ( columnar_root INTERFACE columnar common util )
 	set_property ( TARGET columnar_root PROPERTY INTERFACE_POSITION_INDEPENDENT_CODE TRUE )
+
 	target_link_libraries ( secondary_root INTERFACE secondary_api )
-	target_include_directories ( secondary_root INTERFACE ${CMAKE_CURRENT_SOURCE_DIR} util )
+	target_include_directories ( secondary_root INTERFACE ${CMAKE_CURRENT_SOURCE_DIR} common util )
 	set_property ( TARGET secondary_root PROPERTY INTERFACE_POSITION_INDEPENDENT_CODE TRUE )
 
 	add_subdirectory ( util )
+	add_subdirectory ( common )
 	add_subdirectory ( columnar )
 	if (NOT SKIP_SECONDARY)  
 		add_subdirectory ( secondary )
