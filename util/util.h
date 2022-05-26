@@ -25,6 +25,7 @@
 #include <type_traits>
 #include <fcntl.h>
 #include <climits>
+#include <assert.h>
 
 namespace util
 {
@@ -81,8 +82,17 @@ public:
 	T *     end() const     { return m_pData+m_tLength; }
 	size_t  size() const    { return m_tLength; }
 	bool    empty() const   { return m_tLength==0; }
-	T & operator [] ( size_t i ) { return m_pData[i]; }
-	const T & operator [] ( size_t i ) const { return m_pData[i]; }
+	T & operator [] ( size_t i )
+	{
+		assert ( i < m_tLength );
+		return m_pData[i];
+	}
+
+	const T & operator [] ( size_t i ) const
+	{
+		assert ( i < m_tLength );
+		return m_pData[i];
+	}
 
 protected:
 	T *		m_pData = nullptr;

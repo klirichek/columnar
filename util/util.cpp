@@ -16,7 +16,6 @@
 
 #include "util.h"
 #include <stdexcept>
-#include <assert.h>
 #include <errno.h>
 #include <cmath>
 #include <limits>

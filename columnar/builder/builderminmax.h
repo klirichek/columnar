@@ -42,6 +42,7 @@ private:
 	T			m_tMax;
 
 	void		Flush();
+	void		BuildTree();
 
 	inline bool	SaveTreeLevels ( util::FileWriter_c & tWriter ) const;
 };
@@ -135,9 +136,10 @@ void MinMaxBuilder_T<T>::Flush()
 }
 
 template<typename T>
-bool MinMaxBuilder_T<T>::Save ( util::FileWriter_c & tWriter, std::string & sError )
+void MinMaxBuilder_T<T>::BuildTree()
 {
-	Flush();
+	if ( m_dTreeLevels[0].size()<=1 )
+		return;
 
 	do
 	{
@@ -159,6 +161,13 @@ bool MinMaxBuilder_T<T>::Save ( util::FileWriter_c & tWriter, std::string & sErr
 		}
 	}
 	while ( m_dTreeLevels.back().size()>1 );
+}
+
+template<typename T>
+bool MinMaxBuilder_T<T>::Save ( util::FileWriter_c & tWriter, std::string & sError )
+{
+	Flush();
+	BuildTree();
 
 	// now save the tree
 	tWriter.Pack_uint32 ( (uint32_t)m_dTreeLevels.size() );

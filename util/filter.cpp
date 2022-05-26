@@ -16,7 +16,6 @@
 
 #include "filter.h"
 #include "util.h"
-#include <assert.h>
 
 namespace common
 {

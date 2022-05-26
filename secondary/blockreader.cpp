@@ -120,7 +120,6 @@ protected:
 	std::string			m_sWarning;
 
 	SpanResizeable_T<uint32_t> m_dTypes;
-	SpanResizeable_T<uint32_t> m_dSizes;
 	SpanResizeable_T<uint32_t> m_dRowStart;
 
 	SpanResizeable_T<uint32_t> m_dBufTmp;
@@ -227,7 +226,6 @@ BlockIterator_i * BlockReader_c::CreateIterator ( int iItem )
 		m_iOffPastValues = -1;
 
 		DecodeBlockWoDelta ( m_dTypes, m_pCodec.get(), m_dBufTmp, *m_pFileReader.get() );
-		DecodeBlockWoDelta ( m_dSizes, m_pCodec.get(), m_dBufTmp, *m_pFileReader.get() );
 
 		bool bLenDelta = !!m_pFileReader->Read_uint8();
 		if ( bLenDelta )
