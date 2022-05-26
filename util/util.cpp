@@ -27,7 +27,7 @@
 	#include <unistd.h>
 #endif
 
-namespace columnar
+namespace util
 {
 
 int CalcNumBits ( uint64_t uNumber )
@@ -236,7 +236,7 @@ void FileWriter_c::SeekAndWrite ( int64_t iOffset, uint64_t uValue )
 void FileWriter_c::Seek ( int64_t iOffset )
 {
 	Flush();
-	columnar::Seek ( m_iFD, iOffset );
+	util::Seek ( m_iFD, iOffset );
 	m_iFilePos = iOffset;
 }
 
@@ -367,4 +367,4 @@ void BitVec_c::Resize ( int iSize )
 	}
 }
 
-} // namespace columnar
+} // namespace util

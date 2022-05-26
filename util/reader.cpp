@@ -34,7 +34,7 @@
 #endif
 
 
-namespace columnar
+namespace util
 {
 
 #ifdef _MSC_VER
@@ -195,7 +195,7 @@ bool FileReader_c::ReadToBuffer()
 
 int64_t FileReader_c::GetFileSize()
 {
-	return columnar::GetFileSize ( m_iFD, &m_sError );
+	return util::GetFileSize ( m_iFD, &m_sError );
 }
 
 
@@ -223,7 +223,7 @@ struct MappedBufferData_t
 bool MMapOpen ( const std::string & sFile, std::string & sError, MappedBufferData_t & tBuf )
 {
 #if _WIN32
-	HANDLE ( tBuf.m_iFD==INVALID_HANDLE_VALUE );
+	assert ( tBuf.m_iFD==INVALID_HANDLE_VALUE );
 #else
 	assert ( tBuf.m_iFD==-1 );
 #endif
@@ -373,4 +373,5 @@ MappedBuffer_i * MappedBuffer_i::Create()
 {
 	return new MappedBuffer_c();
 }
-} // namespace columnar
+
+} // namespace util

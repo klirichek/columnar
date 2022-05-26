@@ -23,6 +23,10 @@
 namespace columnar
 {
 
+using namespace util;
+using namespace common;
+
+
 template <typename T>
 class AttributeHeaderBuilder_MVA_T : public AttributeHeaderBuilder_c
 {

@@ -22,6 +22,10 @@
 namespace columnar
 {
 
+using namespace util;
+using namespace common;
+
+
 template <typename T>
 class MinMax_T
 {

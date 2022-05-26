@@ -26,7 +26,7 @@
 #include <fcntl.h>
 #include <climits>
 
-namespace columnar
+namespace util
 {
 
 #ifdef _MSC_VER
@@ -56,6 +56,7 @@ namespace columnar
 	#endif
 #endif
 
+const uint64_t STR_HASH_SEED = 0xCBF29CE484222325ULL;
 
 template<typename T>
 class Span_T
@@ -443,15 +444,4 @@ private:
 	int			m_iSize = 0;
 };
 
-/// known collations
-enum class Collation_e : uint32_t
-{
-	LIBC_CI,
-	LIBC_CS,
-	UTF8_GENERAL_CI,
-	BINARY,
-
-	TOTAL
-};
-
-} // namespace columnar
+} // namespace util

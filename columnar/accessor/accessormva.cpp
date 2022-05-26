@@ -25,6 +25,9 @@
 namespace columnar
 {
 
+using namespace util;
+using namespace common;
+
 template<bool LEFT_CLOSED, bool RIGHT_CLOSED, bool EQ>
 class MvaAll_T
 {

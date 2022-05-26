@@ -16,7 +16,9 @@
 
 #pragma once
 
-namespace columnar
+#include "filter.h"
+
+namespace common
 {
 
 template<typename T, bool LEFT_CLOSED, bool RIGHT_CLOSED, bool LEFT_UNBOUNDED = false, bool RIGHT_UNBOUNDED = false>
@@ -29,6 +31,36 @@ inline bool ValueInInterval ( T tValue, T tMin, T tMax )
 		return  LEFT_CLOSED ? ( tValue>=tMin ) : ( tValue>tMin );
 
 	return ( LEFT_CLOSED ? ( tValue>=tMin ) : ( tValue>tMin ) ) && ( RIGHT_CLOSED ? ( tValue<=tMax ) : ( tValue<tMax ) );
+}
+
+template <typename T>
+inline bool ValueInInterval ( T tValue, const Filter_t & tFilter )
+{
+	T tMin = (T)tFilter.m_iMinValue;
+	T tMax = (T)tFilter.m_iMaxValue;
+
+	if ( tFilter.m_bLeftUnbounded )
+		return tFilter.m_bRightClosed ? ( tValue<=tMax ) : ( tValue<tMax );
+
+	if ( tFilter.m_bRightUnbounded )
+		return tFilter.m_bLeftClosed ? ( tValue>=tMin ) : ( tValue>tMin );
+
+	return ( tFilter.m_bLeftClosed ? ( tValue>=tMin ) : ( tValue>tMin ) ) && ( tFilter.m_bRightClosed ? ( tValue<=tMax ) : ( tValue<tMax ) );
+}
+
+template<>
+inline bool ValueInInterval<float> ( float fVal, const Filter_t & tFilter )
+{
+	float tMin = tFilter.m_fMinValue;
+	float tMax = tFilter.m_fMaxValue;
+
+	if ( tFilter.m_bLeftUnbounded )
+		return tFilter.m_bRightClosed ? ( fVal<=tMax ) : ( fVal<tMax );
+
+	if ( tFilter.m_bRightUnbounded )
+		return tFilter.m_bLeftClosed ? ( fVal>=tMin ) : ( fVal>tMin );
+
+	return ( tFilter.m_bLeftClosed ? ( fVal>=tMin ) : ( fVal>tMin ) ) && ( tFilter.m_bRightClosed ? ( fVal<=tMax ) : ( fVal<tMax ) );
 }
 
 template<typename T>
@@ -57,7 +89,7 @@ struct Interval_T
 template<>
 inline bool Interval_T<float>::operator< ( const Interval_T<float> & tOther ) const
 {
-	return ( m_tStart<tOther.m_tStart || ( FloatEqual ( m_tStart, tOther.m_tStart ) && m_tEnd<tOther.m_tEnd ) );
+	return ( m_tStart<tOther.m_tStart || ( util::FloatEqual ( m_tStart, tOther.m_tStart ) && m_tEnd<tOther.m_tEnd ) );
 }
 
-} // namespace columnar
+} // namespace common

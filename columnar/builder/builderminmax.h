@@ -29,7 +29,7 @@ public:
 
 	void		Add ( int64_t tValue );
 	void		Add ( const int64_t * pValues, int iNumValues );
-	bool		Save ( FileWriter_c & tWriter, std::string & sError );
+	bool		Save ( util::FileWriter_c & tWriter, std::string & sError );
 
 private:
 	const Settings_t & m_tSettings;
@@ -43,7 +43,7 @@ private:
 
 	void		Flush();
 
-	inline bool	SaveTreeLevels ( FileWriter_c & tWriter ) const;
+	inline bool	SaveTreeLevels ( util::FileWriter_c & tWriter ) const;
 };
 
 template<typename T>
@@ -135,7 +135,7 @@ void MinMaxBuilder_T<T>::Flush()
 }
 
 template<typename T>
-bool MinMaxBuilder_T<T>::Save ( FileWriter_c & tWriter, std::string & sError )
+bool MinMaxBuilder_T<T>::Save ( util::FileWriter_c & tWriter, std::string & sError )
 {
 	Flush();
 
@@ -169,7 +169,7 @@ bool MinMaxBuilder_T<T>::Save ( FileWriter_c & tWriter, std::string & sError )
 }
 
 template<typename T>
-inline bool MinMaxBuilder_T<T>::SaveTreeLevels ( FileWriter_c & tWriter ) const
+inline bool MinMaxBuilder_T<T>::SaveTreeLevels ( util::FileWriter_c & tWriter ) const
 {
 	for ( int i = (int)m_dTreeLevels.size()-1; i>=0; i-- )
 		for ( auto & tMinMax : m_dTreeLevels[i] )
@@ -182,7 +182,7 @@ inline bool MinMaxBuilder_T<T>::SaveTreeLevels ( FileWriter_c & tWriter ) const
 }
 
 template<>
-inline bool MinMaxBuilder_T<uint8_t>::SaveTreeLevels ( FileWriter_c & tWriter ) const
+inline bool MinMaxBuilder_T<uint8_t>::SaveTreeLevels ( util::FileWriter_c & tWriter ) const
 {
 	for ( int i = (int)m_dTreeLevels.size()-1; i>=0; i-- )
 		for ( auto & tMinMax : m_dTreeLevels[i] )
@@ -195,13 +195,13 @@ inline bool MinMaxBuilder_T<uint8_t>::SaveTreeLevels ( FileWriter_c & tWriter ) 
 }
 
 template<>
-inline bool MinMaxBuilder_T<float>::SaveTreeLevels ( FileWriter_c & tWriter ) const
+inline bool MinMaxBuilder_T<float>::SaveTreeLevels ( util::FileWriter_c & tWriter ) const
 {
 	for ( int i = (int)m_dTreeLevels.size()-1; i>=0; i-- )
 		for ( auto & tMinMax : m_dTreeLevels[i] )
 		{
-			tWriter.Pack_uint32 ( FloatToUint ( tMinMax.first ) );
-			tWriter.Pack_uint32 ( FloatToUint ( tMinMax.second ) );
+			tWriter.Pack_uint32 ( util::FloatToUint ( tMinMax.first ) );
+			tWriter.Pack_uint32 ( util::FloatToUint ( tMinMax.second ) );
 		}
 
 	return !tWriter.IsError();

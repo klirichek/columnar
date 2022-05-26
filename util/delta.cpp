@@ -25,7 +25,7 @@
 
 #include "deltautil.h"
 
-namespace columnar
+namespace util
 {
 
 template <class T>
@@ -271,4 +271,4 @@ void ComputeInverseDeltas ( std::vector<uint64_t> & dData, bool bAsc )
 	ComputeInverseDeltas ( tSpan, bAsc );
 }
 
-}
+} // namespace util

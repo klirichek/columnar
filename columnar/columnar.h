@@ -18,7 +18,14 @@
 
 #include "util/util.h"
 #include "util/blockiterator.h"
+#include "util/filter.h"
+#include "util/schema.h"
 #include <functional>
+
+namespace util
+{
+	class FileReader_c;
+}
 
 namespace columnar
 {
@@ -34,7 +41,7 @@ public:
 
 	virtual	int64_t		Get() = 0;
 
-	virtual	void		Fetch ( const Span_T<uint32_t> & dRowIDs, Span_T<int64_t> & dValues ) = 0;
+	virtual	void		Fetch ( const util::Span_T<uint32_t> & dRowIDs, util::Span_T<int64_t> & dValues ) = 0;
 
 	virtual	int			Get ( const uint8_t * & pData ) = 0;
 	virtual	uint8_t *	GetPacked() = 0;
@@ -64,67 +71,7 @@ struct IteratorCapabilities_t
 	bool	m_bStringHashes = false;
 };
 
-
-enum class FilterType_e
-{
-	NONE,
-	VALUES,
-	RANGE,
-	FLOATRANGE,
-	STRINGS
-};
-
-
-enum class MvaAggr_e
-{
-	NONE,
-	ALL,
-	ANY
-};
-
-using StringHash_fn = uint64_t (*)( const uint8_t * pStr, int iLen, uint64_t uPrev );
-using StringCmp_fn = int (*) ( std::pair<const uint8_t *, int> tStrA, std::pair<const uint8_t *, int> tStrB, bool bPacked );
-
-struct Filter_t
-{
-	std::string				m_sName;
-	bool					m_bExclude = false;
-	FilterType_e			m_eType = FilterType_e::NONE;
-	MvaAggr_e				m_eMvaAggr = MvaAggr_e::NONE;
-	int64_t					m_iMinValue = 0;
-	int64_t					m_iMaxValue = 0;
-	float					m_fMinValue = 0.0f;
-	float					m_fMaxValue = 0.0f;
-	bool					m_bLeftUnbounded = false;
-	bool					m_bRightUnbounded = false;
-	bool					m_bLeftClosed = true;
-	bool					m_bRightClosed = true;
-
-	StringHash_fn			m_fnCalcStrHash = nullptr;
-	StringCmp_fn			m_fnStrCmp = nullptr;
-
-	std::vector<int64_t>	m_dValues;
-	std::vector<std::vector<uint8_t>> m_dStringValues;
-};
-
-enum class AttrType_e : uint32_t
-{
-	NONE,
-	UINT32,
-	TIMESTAMP,
-	INT64,
-	UINT64,
-	BOOLEAN,
-	FLOAT,
-	STRING,
-	UINT32SET,
-	INT64SET,
-
-	TOTAL
-};
-
 using Reporter_fn = std::function<void (const char*)>;
-class FileReader_c;
 
 struct Settings_t
 {
@@ -132,9 +79,9 @@ struct Settings_t
 	std::string	m_sCompressionUINT32 = "streamvbyte";
 	std::string	m_sCompressionUINT64 = "fastpfor128";
 
-	void		Load ( FileReader_c & tReader );
-	void		Save ( FileWriter_c & tWriter );
-	bool		Check ( FileReader_c & tReader, Reporter_fn & fnError );
+	void		Load ( util::FileReader_c & tReader );
+	void		Save ( util::FileWriter_c & tWriter );
+	bool		Check ( util::FileReader_c & tReader, Reporter_fn & fnError );
 };
 
 
@@ -144,12 +91,12 @@ public:
 	virtual					~Columnar_i() = default;
 
 	virtual Iterator_i *	CreateIterator ( const std::string & sName, const IteratorHints_t & tHints, columnar::IteratorCapabilities_t * pCapabilities, std::string & sError ) const = 0;
-	virtual std::vector<BlockIterator_i *> CreateAnalyzerOrPrefilter ( const std::vector<Filter_t> & dFilters, std::vector<int> & dDeletedFilters, const BlockTester_i & tBlockTester ) const = 0;
+	virtual std::vector<common::BlockIterator_i *> CreateAnalyzerOrPrefilter ( const std::vector<common::Filter_t> & dFilters, std::vector<int> & dDeletedFilters, const BlockTester_i & tBlockTester ) const = 0;
 	virtual int				GetAttributeId ( const std::string & sName ) const = 0;
-	virtual AttrType_e		GetType ( const std::string & sName ) const = 0;
+	virtual common::AttrType_e GetType ( const std::string & sName ) const = 0;
 
-	virtual bool			EarlyReject ( const std::vector<Filter_t> & dFilters, const BlockTester_i & tBlockTester ) const = 0;
-	virtual bool			IsFilterDegenerate ( const Filter_t & tFilter ) const = 0;
+	virtual bool			EarlyReject ( const std::vector<common::Filter_t> & dFilters, const BlockTester_i & tBlockTester ) const = 0;
+	virtual bool			IsFilterDegenerate ( const common::Filter_t & tFilter ) const = 0;
 };
 
 } // namespace columnar

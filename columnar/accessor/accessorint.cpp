@@ -28,6 +28,9 @@
 namespace columnar
 {
 
+using namespace util;
+using namespace common;
+
 template <typename T>
 class StoredBlock_Int_Const_T
 {
@@ -882,7 +885,6 @@ private:
 	void				SetupPackingFuncs_Range();
 
 	void				SetupPackingFuncs();
-	void				FixupFilterSettings();
 
 	int					ProcessSubblockConst ( uint32_t * & pRowID, int iSubblockIdInBlock );
 
@@ -910,7 +912,7 @@ Analyzer_INT_T<VALUES,ACCESSOR_VALUES,RANGE_EVAL>::Analyzer_INT_T ( const Attrib
 	, m_tBlockValues (m_tRowID )
 	, m_tSettings ( tSettings )
 {
-	FixupFilterSettings();
+	FixupFilterSettings (m_tSettings, ACCESSOR::m_tHeader.GetType() );
 
 	assert ( !tSettings.m_bExclude || ( tSettings.m_bExclude && tSettings.m_eType==FilterType_e::VALUES ) );
 
@@ -1015,28 +1017,6 @@ void Analyzer_INT_T<VALUES,ACCESSOR_VALUES,RANGE_EVAL>::SetupPackingFuncs()
 	default:
 		assert ( 0 && "Unsupported filter type" );
 		break;
-	}
-}
-
-template<typename VALUES, typename ACCESSOR_VALUES, typename RANGE_EVAL>
-void Analyzer_INT_T<VALUES,ACCESSOR_VALUES,RANGE_EVAL>::FixupFilterSettings()
-{
-	if ( ACCESSOR::m_tHeader.GetType()!=AttrType_e::FLOAT )
-		return;
-
-	// this is basically the same stuff we do when we create filters, but we don't have access to previously modified filter settings
-	// that's why we need to do it all over again
-	if ( m_tSettings.m_eType==FilterType_e::VALUES && m_tSettings.m_dValues.size()==1 )
-	{
-		m_tSettings.m_eType = FilterType_e::FLOATRANGE;
-		m_tSettings.m_fMinValue = m_tSettings.m_fMaxValue = (float)m_tSettings.m_dValues[0];
-	}
-
-	if ( m_tSettings.m_eType==FilterType_e::RANGE )
-	{
-		m_tSettings.m_eType = FilterType_e::FLOATRANGE;
-		m_tSettings.m_fMinValue = (float)m_tSettings.m_iMinValue;
-		m_tSettings.m_fMaxValue = (float)m_tSettings.m_iMaxValue;
 	}
 }
 

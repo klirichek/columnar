@@ -17,20 +17,12 @@
 #pragma once
 
 #include "columnar.h"
+#include "util/schema.h"
 
 namespace columnar
 {
 
 static const uint32_t STORAGE_VERSION = 9;
-
-struct SchemaAttr_t
-{
-	std::string		m_sName;
-	AttrType_e		m_eType = AttrType_e::NONE;
-	StringHash_fn	m_fnCalcHash = nullptr;
-};
-
-using Schema_t = std::vector<SchemaAttr_t>;
 
 class Builder_i
 {
@@ -47,5 +39,5 @@ public:
 
 extern "C"
 {
-	DLLEXPORT columnar::Builder_i * CreateColumnarBuilder ( const columnar::Settings_t & tSettings, const columnar::Schema_t & tSchema, const std::string & sFile, std::string & sError );
+	DLLEXPORT columnar::Builder_i * CreateColumnarBuilder ( const columnar::Settings_t & tSettings, const common::Schema_t & tSchema, const std::string & sFile, std::string & sError );
 }

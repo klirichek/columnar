@@ -29,6 +29,9 @@
 namespace columnar
 {
 
+using namespace util;
+using namespace common;
+
 using HeaderWithLocator_t = std::pair<const AttributeHeader_i*, int>;
 
 template <bool ROWID_LIMITS>
@@ -218,23 +221,6 @@ bool Settings_t::Check ( FileReader_c & tReader, Reporter_fn & fnError )
 	if ( !CheckString ( tReader, 0, 128, "Uint64 compression algo", fnError ) )	return false;	// m_sCompressionUINT64
 
 	return true;
-}
-
-//////////////////////////////////////////////////////////////////////////
-
-static Filter_t StringFilterToHashFilter ( const Filter_t & tFilter )
-{
-	assert ( tFilter.m_eType==FilterType_e::STRINGS );
-	Filter_t tRes;
-
-	tRes.m_eType = FilterType_e::VALUES;
-	tRes.m_bExclude = tFilter.m_bExclude;
-	tRes.m_sName = GenerateHashAttrName ( tFilter.m_sName );
-
-	for ( const auto & i : tFilter.m_dStringValues )
-		tRes.m_dValues.push_back ( i.empty() ? 0 : tFilter.m_fnCalcStrHash ( i.data(), i.size(), STR_HASH_SEED ) );
-
-	return tRes;
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -543,7 +529,7 @@ Analyzer_i * Columnar_c::CreateAnalyzer ( const Filter_t & tSettings, bool bHave
 		{
 			const AttributeHeader_i * pHashHeader = GetHeader ( GenerateHashAttrName ( tSettings.m_sName ) );
 			if ( pHashHeader )
-				return CreateAnalyzerInt ( *pHashHeader, pReader.release(), StringFilterToHashFilter(tSettings) );
+				return CreateAnalyzerInt ( *pHashHeader, pReader.release(), StringFilterToHashFilter ( tSettings, true ) );
 		}
 
 		return CreateAnalyzerStr ( *pHeader, pReader.release(), tSettings, bHaveMatchingBlocks );

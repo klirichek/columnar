@@ -25,7 +25,8 @@
 namespace SI
 {
 
-using namespace columnar;
+using namespace util;
+using namespace common;
 
 static const int g_iReaderBufSize { 256 };
 
@@ -56,7 +57,7 @@ struct FindValueResult_t
 /////////////////////////////////////////////////////////////////////
 
 template<typename VEC>
-void DecodeBlock ( VEC & dDst, IntCodec_i * pCodec, SpanResizeable_T<uint32_t> & dBuf, columnar::FileReader_c & tReader )
+void DecodeBlock ( VEC & dDst, IntCodec_i * pCodec, SpanResizeable_T<uint32_t> & dBuf, FileReader_c & tReader )
 {
 	dBuf.resize ( 0 );
 	ReadVectorLen32 ( dBuf, tReader );
@@ -65,7 +66,7 @@ void DecodeBlock ( VEC & dDst, IntCodec_i * pCodec, SpanResizeable_T<uint32_t> &
 }
 
 template<typename VEC>
-void DecodeBlockWoDelta ( VEC & dDst, IntCodec_i * pCodec, SpanResizeable_T<uint32_t> & dBuf, columnar::FileReader_c & tReader )
+void DecodeBlockWoDelta ( VEC & dDst, IntCodec_i * pCodec, SpanResizeable_T<uint32_t> & dBuf, FileReader_c & tReader )
 {
 	dBuf.resize ( 0 );
 	ReadVectorLen32 ( dBuf, tReader );
@@ -106,15 +107,15 @@ struct FloatValueCmp_t
 class BlockReader_c : public BlockReader_i
 {
 public:
-				BlockReader_c ( std::shared_ptr<IntCodec_i> & pCodec, uint64_t uBlockBaseOff, const RowidRange_t & tBounds );
+				BlockReader_c ( std::shared_ptr<IntCodec_i> & pCodec, uint64_t uBlockBaseOff, const RowidRange_t * pBounds );
 
 	bool		Open ( const std::string & sFileName, std::string & sError ) override;
 	void		CreateBlocksIterator ( const BlockIter_t & tIt, std::vector<BlockIterator_i *> & dRes ) override;
-	void		CreateBlocksIterator ( const BlockIter_t & tIt, const FilterRange_t & tVal, std::vector<BlockIterator_i *> & dRes ) override { assert ( 0 && "Requesting range iterators from block reader" ); }
+	void		CreateBlocksIterator ( const BlockIter_t & tIt, const Filter_t & tVal, std::vector<BlockIterator_i *> & dRes ) override { assert ( 0 && "Requesting range iterators from block reader" ); }
 	const std::string & GetWarning() const override { return m_sWarning; }
 
 protected:
-	std::shared_ptr<columnar::FileReader_c> m_pFileReader { nullptr };
+	std::shared_ptr<FileReader_c> m_pFileReader { nullptr };
 	std::shared_ptr<IntCodec_i>	m_pCodec { nullptr };
 	std::string			m_sWarning;
 
@@ -130,7 +131,8 @@ protected:
 	int						m_iStartBlock { -1 };
 	int64_t					m_iOffPastValues { -1 };
 
-	const RowidRange_t		m_tBounds;
+	RowidRange_t			m_tBounds;
+	bool					m_bHaveBounds = false;
 
 	// interface for value related methods
 	virtual void			LoadValues () = 0;
@@ -141,18 +143,20 @@ protected:
 };
 
 
-BlockReader_c::BlockReader_c ( std::shared_ptr<IntCodec_i> & pCodec, uint64_t uBlockBaseOff, const RowidRange_t & tBounds )
+BlockReader_c::BlockReader_c ( std::shared_ptr<IntCodec_i> & pCodec, uint64_t uBlockBaseOff, const RowidRange_t * pBounds )
 	: m_pCodec ( pCodec )
 	, m_uBlockBaseOff ( uBlockBaseOff )
-	, m_tBounds ( tBounds )
 {
 	assert ( m_pCodec.get() );
+	m_bHaveBounds = !!pBounds;
+	if ( m_bHaveBounds )
+		m_tBounds = *pBounds;
 }
 
 
 bool BlockReader_c::Open ( const std::string & sFileName, std::string & sError )
 {
-	m_pFileReader.reset ( new columnar::FileReader_c() );
+	m_pFileReader.reset ( new FileReader_c() );
 	return m_pFileReader->Open ( sFileName, g_iReaderBufSize, sError );
 }
 
@@ -232,7 +236,7 @@ BlockIterator_i * BlockReader_c::CreateIterator ( int iItem )
 			DecodeBlockWoDelta ( m_dRowStart, m_pCodec.get(), m_dBufTmp, *m_pFileReader.get() );
 	}
 
-	return CreateRowidIterator ( (Packing_e)m_dTypes[iItem], m_dRowStart[iItem], m_pFileReader, m_pCodec, m_tBounds, m_sWarning.empty(), m_sWarning );
+	return CreateRowidIterator ( (Packing_e)m_dTypes[iItem], m_dRowStart[iItem], m_pFileReader, m_pCodec, m_bHaveBounds ? &m_tBounds : nullptr, m_sWarning.empty(), m_sWarning );
 }
 
 /////////////////////////////////////////////////////////////////////
@@ -241,7 +245,7 @@ template<typename VALUE, bool FLOAT_VALUE>
 class BlockReader_T : public BlockReader_c
 {
 public:
-			BlockReader_T ( std::shared_ptr<IntCodec_i> & pCodec, uint64_t uBlockBaseOff, const RowidRange_t & tBounds ) : BlockReader_c ( pCodec, uBlockBaseOff, tBounds ) {}
+			BlockReader_T ( std::shared_ptr<IntCodec_i> & pCodec, uint64_t uBlockBaseOff, const RowidRange_t * pBounds ) : BlockReader_c ( pCodec, uBlockBaseOff, pBounds ) {}
 
 private:
 	SpanResizeable_T<VALUE> m_dValues;
@@ -305,24 +309,27 @@ FindValueResult_t BlockReader_T<uint32_t, true>::FindValue ( uint64_t uRefVal ) 
 
 /////////////////////////////////////////////////////////////////////
 
-static BlockReader_i * CreateBlockReader ( AttrType_e eType, std::shared_ptr<IntCodec_i> & pCodec, uint64_t uBlockBaseOff, const RowidRange_t & tBounds )
+BlockReader_i * CreateBlockReader ( AttrType_e eType, const Settings_t & tSettings, uint64_t uBlockBaseOff, const RowidRange_t * pBounds )
 {
+	auto pCodec { std::shared_ptr<IntCodec_i> ( CreateIntCodec ( tSettings.m_sCompressionUINT32, tSettings.m_sCompressionUINT64 ) ) };
+	assert(pCodec);
+
 	switch ( eType )
 	{
 		case AttrType_e::UINT32:
 		case AttrType_e::TIMESTAMP:
 		case AttrType_e::UINT32SET:
-			return new BlockReader_T<uint32_t, false> ( pCodec, uBlockBaseOff, tBounds );
+			return new BlockReader_T<uint32_t, false> ( pCodec, uBlockBaseOff, pBounds );
 			break;
 
 		case AttrType_e::FLOAT:
-			return new BlockReader_T<uint32_t, true> ( pCodec, uBlockBaseOff, tBounds );
+			return new BlockReader_T<uint32_t, true> ( pCodec, uBlockBaseOff, pBounds );
 			break;
 
 		case AttrType_e::STRING:
 		case AttrType_e::INT64:
 		case AttrType_e::INT64SET:
-			return new BlockReader_T<uint64_t, false> ( pCodec, uBlockBaseOff, tBounds );
+			return new BlockReader_T<uint64_t, false> ( pCodec, uBlockBaseOff, pBounds );
 			break;
 
 		default: return nullptr;
@@ -332,50 +339,19 @@ static BlockReader_i * CreateBlockReader ( AttrType_e eType, std::shared_ptr<Int
 /////////////////////////////////////////////////////////////////////
 
 template<typename T>
-bool EvalRange ( T tVal, const FilterRange_t & tRange )
-{
-	if ( tRange.m_bOpenLeft )
-		return ( tRange.m_bHasEqualMax ? ( tVal<=tRange.m_iMax ) : ( tVal<tRange.m_iMax ) );
-
-	if ( tRange.m_bOpenRight )
-		return ( tRange.m_bHasEqualMin ? ( tVal>=tRange.m_iMin ) : ( tVal>tRange.m_iMin ) );
-
-	bool bMinMatched = ( tRange.m_bHasEqualMin ? ( tVal>=tRange.m_iMin ) : ( tVal>tRange.m_iMin ) );
-	bool bMaxMatched = ( tRange.m_bHasEqualMax ? ( tVal<=tRange.m_iMax ) : ( tVal<tRange.m_iMax ) );
-
-	return ( bMinMatched && bMaxMatched );
-}
-
-
-template<>
-bool EvalRange<float> ( float fVal, const FilterRange_t & tRange )
-{
-	if ( tRange.m_bOpenLeft )
-		return ( tRange.m_bHasEqualMax ? ( fVal<=tRange.m_fMax ) : ( fVal<tRange.m_fMax ) );
-
-	if ( tRange.m_bOpenRight )
-		return ( tRange.m_bHasEqualMin ? ( fVal>=tRange.m_fMin ) : ( fVal>tRange.m_fMin ) );
-
-	bool bMinMatched = ( tRange.m_bHasEqualMin ? ( fVal>=tRange.m_fMin ) : ( fVal>tRange.m_fMin ) );
-	bool bMaxMatched = ( tRange.m_bHasEqualMax ? ( fVal<=tRange.m_fMax ) : ( fVal<tRange.m_fMax ) );
-
-	return ( bMinMatched && bMaxMatched );
-}
-
-template<typename T>
-int CmpRange ( T tStart, T tEnd, const FilterRange_t & tRange )
+int CmpRange ( T tStart, T tEnd, const Filter_t & tRange )
 {
 	Interval_T<T> tIntBlock ( tStart, tEnd );
 
 	Interval_T<T> tIntRange;
 	if ( std::is_floating_point<T>::value )
-		tIntRange = Interval_T<T> ( tRange.m_fMin, tRange.m_fMax );
+		tIntRange = Interval_T<T> ( tRange.m_fMinValue, tRange.m_fMaxValue );
 	else
-		tIntRange = Interval_T<T> ( tRange.m_iMin, tRange.m_iMax );
+		tIntRange = Interval_T<T> ( tRange.m_iMinValue, tRange.m_iMaxValue );
 
-	if ( tRange.m_bOpenLeft )
+	if ( tRange.m_bLeftUnbounded )
 		tIntRange.m_tStart = std::numeric_limits<T>::min();
-	if ( tRange.m_bOpenRight )
+	if ( tRange.m_bRightUnbounded )
 		tIntRange.m_tEnd = std::numeric_limits<T>::max();
 
 	if ( tIntBlock.Overlaps ( tIntRange ) )
@@ -389,15 +365,16 @@ int CmpRange ( T tStart, T tEnd, const FilterRange_t & tRange )
 class RangeReader_c : public BlockReader_i
 {
 public:
-				RangeReader_c ( std::shared_ptr<IntCodec_i> & pCodec, uint64_t uBlockBaseOff, const RowidRange_t & tBounds );
+				RangeReader_c ( std::shared_ptr<IntCodec_i> & pCodec, uint64_t uBlockBaseOff, const RowidRange_t * pBounds );
+
 	bool		Open ( const std::string & sFileName, std::string & sError ) override;
 	void		CreateBlocksIterator ( const BlockIter_t & tIt, std::vector<BlockIterator_i *> & dRes ) override { assert ( 0 && "Requesting block iterators from range reader" ); }
-	void		CreateBlocksIterator ( const BlockIter_t & tIt, const FilterRange_t & tVal, std::vector<BlockIterator_i *> & dRes ) override;
+	void		CreateBlocksIterator ( const BlockIter_t & tIt, const Filter_t & tVal, std::vector<BlockIterator_i *> & dRes ) override;
 	const std::string & GetWarning() const override { return m_sWarning; }
 
 protected:
-	std::shared_ptr<columnar::FileReader_c> m_pOffReader { nullptr };
-	std::shared_ptr<columnar::FileReader_c> m_pBlockReader { nullptr };
+	std::shared_ptr<FileReader_c> m_pOffReader { nullptr };
+	std::shared_ptr<FileReader_c> m_pBlockReader { nullptr };
 	std::string m_sWarning;
 
 	std::shared_ptr<IntCodec_i> m_pCodec { nullptr };
@@ -407,36 +384,39 @@ protected:
 
 	SpanResizeable_T<uint32_t> m_dBufTmp;
 		
-	uint64_t m_uBlockBaseOff { 0 };
-	const RowidRange_t m_tBounds;
+	uint64_t		m_uBlockBaseOff = 0;
+	RowidRange_t	m_tBounds;
+	bool			m_bHaveBounds = false;
 
 	// interface for value related methods
 	virtual int		LoadValues () = 0;
-	virtual bool	EvalRangeValue ( int iItem, const FilterRange_t & tRange ) const = 0;
-	virtual int		CmpBlock ( const FilterRange_t & tRange ) const = 0;
+	virtual bool	EvalRangeValue ( int iItem, const Filter_t & tRange ) const = 0;
+	virtual int		CmpBlock ( const Filter_t & tRange ) const = 0;
 
 	BlockIterator_i * CreateIterator ( int iItem, bool bLoad );
 };
 
 
-RangeReader_c::RangeReader_c ( std::shared_ptr<IntCodec_i> & pCodec, uint64_t uBlockBaseOff, const RowidRange_t & tBounds )
+RangeReader_c::RangeReader_c ( std::shared_ptr<IntCodec_i> & pCodec, uint64_t uBlockBaseOff, const RowidRange_t * pBounds )
 	: m_pCodec ( pCodec )
 	, m_uBlockBaseOff ( uBlockBaseOff )
-	, m_tBounds ( tBounds )
 {
 	assert ( m_pCodec.get() );
+	m_bHaveBounds = !!pBounds;
+	if ( m_bHaveBounds )
+		m_tBounds = *pBounds;
 }
 
 
 bool RangeReader_c::Open ( const std::string & sFileName, std::string & sError )
 {
-	m_pOffReader.reset ( new columnar::FileReader_c() );
-	m_pBlockReader.reset ( new columnar::FileReader_c() );
+	m_pOffReader.reset ( new FileReader_c() );
+	m_pBlockReader.reset ( new FileReader_c() );
 	return ( m_pOffReader->Open ( sFileName, g_iReaderBufSize, sError ) && m_pBlockReader->Open ( sFileName, g_iReaderBufSize, sError ) );
 }
 
 
-void RangeReader_c::CreateBlocksIterator ( const BlockIter_t & tIt, const FilterRange_t & tRange, std::vector<BlockIterator_i *> & dRes )
+void RangeReader_c::CreateBlocksIterator ( const BlockIter_t & tIt, const Filter_t & tRange, std::vector<BlockIterator_i *> & dRes )
 {
 	int iBlockCur = tIt.m_iStart;
 	m_pOffReader->Seek ( m_uBlockBaseOff + iBlockCur * sizeof ( uint64_t) );
@@ -545,7 +525,7 @@ BlockIterator_i * RangeReader_c::CreateIterator ( int iItem, bool bLoad )
 			DecodeBlockWoDelta ( m_dRowStart, m_pCodec.get(), m_dBufTmp, *m_pBlockReader.get() );
 	}
 
-	return CreateRowidIterator ( (Packing_e)m_dTypes[iItem], m_dRowStart[iItem], m_pBlockReader, m_pCodec, m_tBounds, m_sWarning.empty(), m_sWarning );
+	return CreateRowidIterator ( (Packing_e)m_dTypes[iItem], m_dRowStart[iItem], m_pBlockReader, m_pCodec, m_bHaveBounds ? &m_tBounds : nullptr, m_sWarning.empty(), m_sWarning );
 }
 
 /////////////////////////////////////////////////////////////////////
@@ -554,7 +534,7 @@ template<typename STORE_VALUE, typename DST_VALUE>
 class RangeReader_T : public RangeReader_c
 {
 public:
-	RangeReader_T ( std::shared_ptr<IntCodec_i> & pCodec, uint64_t uBlockBaseOff, const RowidRange_t & tBounds ) : RangeReader_c ( pCodec, uBlockBaseOff, tBounds ) {}
+	RangeReader_T ( std::shared_ptr<IntCodec_i> & pCodec, uint64_t uBlockBaseOff, const RowidRange_t * pBounds ) : RangeReader_c ( pCodec, uBlockBaseOff, pBounds ) {}
 
 private:
 	SpanResizeable_T<STORE_VALUE> m_dValues;
@@ -565,15 +545,15 @@ private:
 		return m_dValues.size();
 	}
 
-	bool EvalRangeValue ( int iItem, const FilterRange_t & tRange ) const override
+	bool EvalRangeValue ( int iItem, const Filter_t & tRange ) const override
 	{
 		if ( std::is_floating_point<DST_VALUE>::value )
-			return EvalRange<float> ( UintToFloat ( m_dValues[iItem] ), tRange );
+			return ValueInInterval<float> ( UintToFloat ( m_dValues[iItem] ), tRange );
 		else
-			return EvalRange<DST_VALUE> ( (DST_VALUE)m_dValues[iItem], tRange );
+			return ValueInInterval<DST_VALUE> ( (DST_VALUE)m_dValues[iItem], tRange );
 	}
 
-	int CmpBlock ( const FilterRange_t & tRange ) const override
+	int CmpBlock ( const Filter_t & tRange ) const override
 	{
 		if ( std::is_floating_point<DST_VALUE>::value )
 			return CmpRange<float> ( UintToFloat ( m_dValues.front() ), UintToFloat ( m_dValues.back() ), tRange );
@@ -584,23 +564,27 @@ private:
 
 /////////////////////////////////////////////////////////////////////
 
-BlockReader_i * CreateRangeReader ( AttrType_e eType, std::shared_ptr<IntCodec_i> & pCodec, uint64_t uBlockBaseOff, const RowidRange_t & tBounds )
+BlockReader_i * CreateRangeReader ( AttrType_e eType, const Settings_t & tSettings, uint64_t uBlockBaseOff, const RowidRange_t * pBounds )
 {
+	auto pCodec { std::shared_ptr<IntCodec_i> ( CreateIntCodec ( tSettings.m_sCompressionUINT32, tSettings.m_sCompressionUINT64 ) ) };
+	assert(pCodec);
+
 	switch ( eType )
 	{
 	case AttrType_e::UINT32:
 	case AttrType_e::TIMESTAMP:
 	case AttrType_e::UINT32SET:
-		return new RangeReader_T<uint32_t, uint32_t> ( pCodec, uBlockBaseOff, tBounds );
+	case AttrType_e::BOOLEAN:
+		return new RangeReader_T<uint32_t, uint32_t> ( pCodec, uBlockBaseOff, pBounds );
 		break;
 
 	case AttrType_e::FLOAT:
-		return new RangeReader_T<uint32_t, float> ( pCodec, uBlockBaseOff, tBounds );
+		return new RangeReader_T<uint32_t, float> ( pCodec, uBlockBaseOff, pBounds );
 		break;
 
 	case AttrType_e::INT64:
 	case AttrType_e::INT64SET:
-		return new RangeReader_T<uint64_t, int64_t> ( pCodec, uBlockBaseOff, tBounds );
+		return new RangeReader_T<uint64_t, int64_t> ( pCodec, uBlockBaseOff, pBounds );
 		break;
 
 	default: return nullptr;

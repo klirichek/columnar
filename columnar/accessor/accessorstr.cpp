@@ -23,6 +23,9 @@
 namespace columnar
 {
 
+using namespace util;
+using namespace common;
+
 class StoredBlock_StrConst_c
 {
 public:

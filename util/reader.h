@@ -19,7 +19,7 @@
 #include "util.h"
 #include <cassert>
 
-namespace columnar
+namespace util
 {
 
 class FileReader_c
@@ -154,15 +154,15 @@ int64_t GetFileSize ( int iFD, std::string * sError );
 class MappedBuffer_i
 {
 public:
-	MappedBuffer_i() = default;
-	virtual ~MappedBuffer_i() { Close(); }
+					MappedBuffer_i() = default;
+	virtual			~MappedBuffer_i() { Close(); }
 
-	virtual bool Open ( const std::string & sFile, std::string & sError ) = 0;
-	virtual void Close () {};
+	virtual bool	Open ( const std::string & sFile, std::string & sError ) = 0;
+	virtual void	Close () {};
 	static MappedBuffer_i * Create();
 	
-	virtual void * GetPtr () const = 0;
-	virtual size_t GetLengthBytes () const = 0;
+	virtual void *	GetPtr () const = 0;
+	virtual size_t	GetLengthBytes () const = 0;
 	virtual const char * GetFileName() const = 0;
 };
 
@@ -171,41 +171,19 @@ class MappedBuffer_T
 {
 public:
 
-	MappedBuffer_T () = default;
-	~MappedBuffer_T() { Reset(); }
+					MappedBuffer_T () = default;
+					~MappedBuffer_T() { Reset(); }
 
-	bool Open ( const std::string & sFile, std::string & sError )
-	{
-		return m_pBuf->Open ( sFile, sError );
-	}
+	bool			Open ( const std::string & sFile, std::string & sError ) { return m_pBuf->Open ( sFile, sError ); }
+	void			Reset() { m_pBuf->Close(); }
 
-	void Reset()
-	{
-		m_pBuf->Close();
-	}
-
-	const char * GetFileName() const
-	{
-		return m_pBuf->GetFileName();
-	}
-
-	T * begin() const
-	{
-		return (T *)m_pBuf->GetPtr();
-	}
-
-	T * end() const
-	{
-		return (T *)m_pBuf->GetPtr() + size();
-	}
-
-	size_t size() const
-	{
-		return m_pBuf->GetLengthBytes() / sizeof ( T );
-	}
+	const char *	GetFileName() const	{ return m_pBuf->GetFileName(); }
+	T *				begin() const		{ return (T *)m_pBuf->GetPtr(); }
+	T *				end() const			{ return (T *)m_pBuf->GetPtr() + size(); }
+	size_t			size() const		{ return m_pBuf->GetLengthBytes() / sizeof(T); }
 
 private:
 	std::unique_ptr<MappedBuffer_i> m_pBuf { MappedBuffer_i::Create() };
 };
 
-} // namespace columnar
+} // namespace util

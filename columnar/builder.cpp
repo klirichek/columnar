@@ -27,6 +27,10 @@
 namespace columnar
 {
 
+using namespace util;
+using namespace common;
+
+
 class Builder_c final : public Builder_i
 {
 public:

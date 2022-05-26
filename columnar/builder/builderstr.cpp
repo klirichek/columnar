@@ -25,6 +25,10 @@
 namespace columnar
 {
 
+using namespace util;
+using namespace common;
+
+
 class AttributeHeaderBuilder_String_c : public AttributeHeaderBuilder_c
 {
 	using BASE = AttributeHeaderBuilder_c;

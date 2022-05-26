@@ -17,9 +17,22 @@
 #pragma once
 
 #include "common.h"
+#include "util/util.h"
+#include "util/schema.h"
 
 namespace SI
 {
+
+enum class Packing_e : uint32_t
+{
+	ROW,
+	ROW_BLOCK,
+	ROW_BLOCKS_LIST,
+
+	TOTAL
+};
+
+
 class Builder_i
 {
 public:
@@ -33,4 +46,12 @@ public:
 	virtual bool	Done ( std::string & sError ) = 0;
 };
 
+struct Settings_t;
+
 } // namespace SI
+
+
+extern "C"
+{
+	DLLEXPORT SI::Builder_i * CreateBuilder ( const SI::Settings_t & tSettings, const common::Schema_t & tSchema, int iMemoryLimit, const std::string & sFile, std::string & sError );
+}

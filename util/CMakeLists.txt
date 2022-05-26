@@ -23,12 +23,15 @@ ADD_LIBRARY ( util OBJECT
 		delta.cpp
 		reader.cpp
 		codec.cpp
+		filter.cpp
 		util.h
 		interval.h
 		delta.h
 		reader.h
 		codec.h
 		blockiterator.h
+		filter.h
+		schema.h
 		)
 
 include ( CheckFunctionExists )

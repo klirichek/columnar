@@ -31,9 +31,11 @@
 	#include <unistd.h>
 #endif
 
+using namespace util;
+using namespace common;
+
 namespace SI
 {
-	using namespace columnar;
 
 #define BUILD_PRINT_VALUES 0
 #define VALUES_PER_BLOCK 128
@@ -58,7 +60,7 @@ public:
 					RawWriter_i() = default;
 	virtual			~RawWriter_i() = default;
 
-	virtual bool	Setup ( const char * sFile, int iAttr, AttrType_e eAttrType, Collation_e eCollation, std::string & sError ) = 0;
+	virtual bool	Setup ( const std::string & sFile, const SchemaAttr_t & tAttr, int iAttr, std::string & sError ) = 0;
 	virtual int		GetItemSize () const = 0;
 	virtual void	SetItemsCount ( int iSize ) = 0;
 
@@ -106,16 +108,16 @@ struct RawWriter_T : public RawWriter_i
 	FileWriter_c m_tFile;
 	std::vector<uint64_t> m_dOffset;
 	uint64_t m_iFileSize = 0;
-	AttrType_e m_eAttrType = AttrType_e::NONE;
-	StrHash_fn m_fnHash { nullptr };
+	SchemaAttr_t m_tAttr;
 
-	RawWriter_T() = default;
+	RawWriter_T ( const Settings_t & tSettings )
+		: m_tSettings(tSettings)
+	{}
 
-	bool Setup ( const char * sFile, int iAttr, AttrType_e eAttrType, Collation_e eCollation, std::string & sError ) final
+	bool Setup ( const std::string & sFile, const SchemaAttr_t & tAttr, int iAttr, std::string & sError ) final
 	{
-		m_eAttrType = eAttrType;
-		m_fnHash = GetHashFn ( eCollation );
-		std::string sFilename = FormatStr ( "%s.%d.tmp", sFile, iAttr );
+		m_tAttr = tAttr;
+		std::string sFilename = FormatStr ( "%s.%d.tmp", sFile.c_str(), iAttr );
 		return m_tFile.Open ( sFilename, true, true, false, sError );
 	}
 
@@ -149,15 +151,16 @@ struct RawWriter_T : public RawWriter_i
 	void	SetAttr ( uint32_t tRowID, const int64_t * pData, int iLength ) final;
 
 	SIWriter_i * GetWriter ( std::string & sError ) final;
+
+private:
+	Settings_t	m_tSettings;
 };
 
-static const std::string g_sCompressionUINT32 = "streamvbyte";
-static const std::string g_sCompressionUINT64 = "fastpfor128";
 
 class Builder_c final : public Builder_i
 {
 public:
-	bool	Setup ( const std::vector<SourceAttrTrait_t> & dSrcAttrs, int iMemoryLimit, Collation_e eCollation, const char * sFile, std::string & sError );
+	bool	Setup ( const Settings_t & tSettings, const Schema_t & tSchema, int iMemoryLimit, const std::string & sFile, std::string & sError );
 
 	void	SetRowID ( uint32_t tRowID ) final;
 	void	SetAttr ( int iAttr, int64_t tAttr ) final;
@@ -174,22 +177,18 @@ private:
 	std::vector<std::shared_ptr<SIWriter_i>>	m_dCidWriter;
 
 	std::vector<ColumnInfo_t>					m_dAttrs;
-	Collation_e									m_eCollation;
 
 	void Flush();
 	bool WriteMeta ( const std::string & sPgmName, const std::string & sBlocksName, const std::vector<uint64_t> & dBlocksOffStart, const std::vector<uint64_t> & dBlocksCount, uint64_t uMetaOff, std::string & sError ) const;
 };
 
 
-bool Builder_c::Setup ( const std::vector<SourceAttrTrait_t> & dSrcAttrs, int iMemoryLimit, Collation_e eCollation, const char * sFile, std::string & sError )
+bool Builder_c::Setup ( const Settings_t & tSettings, const Schema_t & tSchema, int iMemoryLimit, const std::string & sFile, std::string & sError )
 {
 	m_sFile = sFile;
-	m_dRawWriter.resize ( dSrcAttrs.size() );
-	if ( dSrcAttrs.size() )
-		m_dRawWriter.resize ( dSrcAttrs.back().m_iAttr + 1 );
-	m_eCollation = eCollation;
+	int iAttr = 0;
 
-	for ( const SourceAttrTrait_t & tSrcAttr : dSrcAttrs )
+	for ( const auto & tSrcAttr : tSchema )
 	{
 		std::shared_ptr<RawWriter_i> pWriter;
 		switch ( tSrcAttr.m_eType )
@@ -197,56 +196,53 @@ bool Builder_c::Setup ( const std::vector<SourceAttrTrait_t> & dSrcAttrs, int iM
 		case AttrType_e::UINT32:
 		case AttrType_e::TIMESTAMP:
 		case AttrType_e::UINT32SET:
-			pWriter.reset ( new RawWriter_T<uint32_t> () );
+		case AttrType_e::BOOLEAN:
+			pWriter.reset ( new RawWriter_T<uint32_t>(tSettings) );
 			break;
 
 		case AttrType_e::FLOAT:
-			pWriter.reset ( new RawWriter_T<float>() );
+			pWriter.reset ( new RawWriter_T<float>(tSettings) );
 			break;
 
 		case AttrType_e::STRING:
-			pWriter.reset ( new RawWriter_T<uint64_t>() );
+			pWriter.reset ( new RawWriter_T<uint64_t>(tSettings) );
 			break;
 
 		case AttrType_e::INT64:
 		case AttrType_e::INT64SET:
-			pWriter.reset ( new RawWriter_T<int64_t>() );
+			pWriter.reset ( new RawWriter_T<int64_t>(tSettings) );
 			break;
 
 		default:
 			break;
 		}
 
-		if ( pWriter )
+		if ( !pWriter )
 		{
-			if ( !pWriter->Setup ( sFile, tSrcAttr.m_iAttr, tSrcAttr.m_eType, eCollation, sError ) )
-				return false;
-
-			m_dRawWriter[tSrcAttr.m_iAttr] = pWriter;
-			ColumnInfo_t tInfo;
-			tInfo.m_eType = tSrcAttr.m_eType;
-			tInfo.m_iSrcAttr = tSrcAttr.m_iAttr;
-			tInfo.m_iAttr = (int)m_dAttrs.size();
-			tInfo.m_sName = tSrcAttr.m_sName;
-			m_dAttrs.push_back ( tInfo );
+			sError = FormatStr ( "unable to create secondary index for attribute '%s'", tSrcAttr.m_sName.c_str() );
+			return false;
 		}
+
+		if ( !pWriter->Setup ( sFile, tSrcAttr, iAttr++, sError ) )
+			return false;
+
+		m_dRawWriter.push_back(pWriter);
+		ColumnInfo_t tInfo;
+		tInfo.m_eType = tSrcAttr.m_eType;
+		tInfo.m_sName = tSrcAttr.m_sName;
+		m_dAttrs.push_back ( tInfo );
 	}
 
 	int iRowSize = 0;
 	for ( const auto & pWriter : m_dRawWriter )
-	{
 		if ( pWriter )
 			iRowSize += pWriter->GetItemSize();
-	}
 
 	m_iMaxRows = std::max ( 1000, iMemoryLimit / 3 / iRowSize );
 
 	for ( auto & pWriter : m_dRawWriter )
-	{
 		if ( pWriter )
 			pWriter->SetItemsCount ( m_iMaxRows );
-	}
-
 
 	return true;
 }
@@ -382,17 +378,14 @@ bool Builder_c::WriteMeta ( const std::string & sPgmName, const std::string & sB
 		dAttrsEnabled.SetAllBits();
 		WriteVector ( dAttrsEnabled.GetData(), tDstFile );
 
-		tDstFile.Write_string ( g_sCompressionUINT32 );
-		tDstFile.Write_string ( g_sCompressionUINT64 );
-		tDstFile.Write_uint32 ( (uint32_t)m_eCollation );
+		Settings_t tSettings;
+		tSettings.Save(tDstFile);
 		tDstFile.Write_uint32 ( VALUES_PER_BLOCK );
 		
 		// write schema
 		for ( const auto & tInfo : m_dAttrs )
 		{
 			tDstFile.Write_string ( tInfo.m_sName );
-			tDstFile.Pack_uint32 ( tInfo.m_iSrcAttr );
-			tDstFile.Pack_uint32 ( tInfo.m_iAttr );
 			tDstFile.Pack_uint32 ( (int)tInfo.m_eType );
 		}
 
@@ -450,7 +443,8 @@ inline void RawWriter_T<int64_t>::SetAttr ( uint32_t tRowID, int64_t tAttr )
 template<>
 inline void RawWriter_T<uint64_t>::SetAttr ( uint32_t tRowID, const uint8_t * pData, int iLength )
 {
-	m_dRows.emplace_back ( RawValue_T<uint64_t> { m_fnHash ( pData, iLength ), tRowID } );
+	assert ( m_tAttr.m_fnCalcHash );
+	m_dRows.emplace_back ( RawValue_T<uint64_t> { ( iLength ? m_tAttr.m_fnCalcHash ( pData, iLength, STR_HASH_SEED ) : 0 ), tRowID } );
 }
 
 template<>
@@ -504,23 +498,23 @@ template<typename VALUE>
 SIWriter_i * RawWriter_T<VALUE>::GetWriter ( std::string & sError )
 {
 	std::unique_ptr<SIWriter_i> pWriter { nullptr };
-	switch ( m_eAttrType )
+	switch ( m_tAttr.m_eType )
 	{
 	case AttrType_e::FLOAT:
-		pWriter.reset ( new SIWriter_T<float, uint32_t>() );
+		pWriter.reset ( new SIWriter_T<float, uint32_t>(m_tSettings) );
 		break;
 
 	case AttrType_e::STRING:
-		pWriter.reset ( new SIWriter_T<uint64_t, uint64_t>() );
+		pWriter.reset ( new SIWriter_T<uint64_t, uint64_t>(m_tSettings) );
 		break;
 
 	case AttrType_e::INT64:
 	case AttrType_e::INT64SET:
-		pWriter.reset ( new SIWriter_T<int64_t, uint64_t>() );
+		pWriter.reset ( new SIWriter_T<int64_t, uint64_t>(m_tSettings) );
 		break;
 
 	default:
-		pWriter.reset ( new SIWriter_T<uint32_t, uint32_t> () );
+		pWriter.reset ( new SIWriter_T<uint32_t, uint32_t>(m_tSettings) );
 		break;
 	}
 
@@ -536,7 +530,10 @@ template<typename SRC_VALUE, typename DST_VALUE>
 class SIWriter_T : public SIWriter_i
 {
 public:
-				SIWriter_T () = default;
+	SIWriter_T ( const Settings_t & tSettings )
+		: m_tSettings ( tSettings )
+	{}
+
 	virtual		~SIWriter_T() = default;
 
 	bool		Setup ( const std::string & sSrcFile, uint64_t iFileSize, std::vector<uint64_t> & dOffset, std::string & sError ) final;
@@ -544,6 +541,7 @@ public:
 	const std::vector<uint8_t> & GetPGM() { return m_dPGM; }
 
 private:
+	Settings_t				m_tSettings;
 	std::string				m_sSrcName;
 	uint64_t				m_iFileSize = 0;
 	std::vector<uint8_t>	m_dPGM;
@@ -573,10 +571,10 @@ bool SIWriter_T<SRC_VALUE, DST_VALUE>::Process ( FileWriter_c & tDstFile, FileWr
 
 	std::priority_queue< BinValue_T<SRC_VALUE>, std::vector < BinValue_T<SRC_VALUE> >, PQGreater<SRC_VALUE> > dBins;
 
-	std::vector<std::unique_ptr< columnar::FileReader_c > > dSrcFile ( m_dOffset.size() );
+	std::vector<std::unique_ptr< FileReader_c > > dSrcFile ( m_dOffset.size() );
 	for ( int iReader=0; iReader<m_dOffset.size(); iReader++ )
 	{
-		columnar::FileReader_c * pReader = new columnar::FileReader_c();
+		FileReader_c * pReader = new FileReader_c();
 		dSrcFile[iReader].reset ( pReader );
 
 		if ( !pReader->Open ( m_sSrcName, sError ) )
@@ -598,7 +596,7 @@ bool SIWriter_T<SRC_VALUE, DST_VALUE>::Process ( FileWriter_c & tDstFile, FileWr
 		dBins.push ( tBin );
 	}
 
-	RowWriter_T<DST_VALUE, std::is_floating_point<SRC_VALUE>::value > tWriter ( &tTmpBlocksOff, &tTmpValsPGM );
+	RowWriter_T<DST_VALUE, std::is_floating_point<SRC_VALUE>::value > tWriter ( &tTmpBlocksOff, &tTmpValsPGM, m_tSettings );
 
 	// initial fill
 	if ( dBins.size() )
@@ -652,7 +650,7 @@ bool SIWriter_T<SRC_VALUE, DST_VALUE>::Process ( FileWriter_c & tDstFile, FileWr
 template<typename VALUE>
 struct BinValue_T : public RawValue_T<VALUE>
 {
-	columnar::FileReader_c * m_pReader = nullptr;
+	FileReader_c * m_pReader = nullptr;
 	int64_t m_iBinEnd = 0;
 
 	bool Read ()
@@ -772,7 +770,7 @@ template<typename VALUE, bool FLOAT_VALUE>
 class RowWriter_T
 {
 public:
-				RowWriter_T ( FileWriter_c * pBlocksOff, FileWriter_c * pPGMVals );
+				RowWriter_T ( FileWriter_c * pBlocksOff, FileWriter_c * pPGMVals, const Settings_t & tSettings );
 
 	void		Done ( FileWriter_c & tWriter )	{ FlushBlock ( tWriter ); }
 	void		AddValue ( const RawValue_T<VALUE> & tBin );
@@ -805,7 +803,7 @@ private:
 };
 
 template<typename VALUE, bool FLOAT_VALUE>
-RowWriter_T<VALUE, FLOAT_VALUE>::RowWriter_T ( FileWriter_c * pBlocksOff, FileWriter_c * pPGMVals )
+RowWriter_T<VALUE, FLOAT_VALUE>::RowWriter_T ( FileWriter_c * pBlocksOff, FileWriter_c * pPGMVals, const Settings_t & tSettings )
 	: m_pBlocksOff ( pBlocksOff )
 	, m_pPGMVals ( pPGMVals )
 {
@@ -816,8 +814,7 @@ RowWriter_T<VALUE, FLOAT_VALUE>::RowWriter_T ( FileWriter_c * pBlocksOff, FileWr
 	m_dBufTmp.reserve ( VALUES_PER_BLOCK );
 	m_dRowsPacked.reserve ( VALUES_PER_BLOCK * 16 );
 
-	m_pCodec.reset ( CreateIntCodec ( g_sCompressionUINT32, g_sCompressionUINT64 ) );
-
+	m_pCodec.reset ( CreateIntCodec ( tSettings.m_sCompressionUINT32, tSettings.m_sCompressionUINT64 ) );
 }
 
 template<typename VALUE, bool FLOAT_VALUE>
@@ -983,26 +980,13 @@ void RowWriter_T<VALUE, FLOAT_VALUE>::FlushBlock ( FileWriter_c & tWriter )
 
 /////////////////////////////////////////////////////////////////////
 
-static std::array<StrHash_fn, (size_t)Collation_e::TOTAL> g_dCollations;
-uint64_t g_uHashSeed = 0;
-
-StrHash_fn GetHashFn ( Collation_e eCollation )
-{
-	return g_dCollations[(size_t)eCollation];
-}
-
 } // namespace SI
 
-void CollationInit ( const std::array<SI::StrHash_fn, (size_t)SI::Collation_e::TOTAL> & dCollations )
-{
-	SI::g_dCollations = dCollations;
-}
 
-SI::Builder_i * CreateBuilder ( const std::vector<SI::SourceAttrTrait_t> & dSrcAttrs, int iMemoryLimit, SI::Collation_e eCollation, const char * sFile, std::string & sError )
+SI::Builder_i * CreateBuilder ( const SI::Settings_t & tSettings, const Schema_t & tSchema, int iMemoryLimit, const std::string & sFile, std::string & sError )
 {
 	std::unique_ptr<SI::Builder_c> pBuilder ( new SI::Builder_c );
-
-	if ( !pBuilder->Setup ( dSrcAttrs, iMemoryLimit, eCollation, sFile, sError ) )
+	if ( !pBuilder->Setup ( tSettings, tSchema, iMemoryLimit, sFile, sError ) )
 		return nullptr;
 
 	return pBuilder.release();

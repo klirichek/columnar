@@ -18,12 +18,13 @@
 
 #include "util/reader.h"
 #include "util/codec.h"
+#include "util/filter.h"
 #include "util/blockiterator.h"
 #include "common.h"
+#include "builder.h"
 #include <memory>
 
 namespace SI
 {
-	struct RowidRange_t;
-	columnar::BlockIterator_i * CreateRowidIterator ( Packing_e eType, uint64_t uRowStart, std::shared_ptr<columnar::FileReader_c> & pReader, std::shared_ptr<columnar::IntCodec_i> & pCodec, const RowidRange_t & tBounds, bool bCreateReader, std::string & sError );
+	common::BlockIterator_i * CreateRowidIterator ( Packing_e eType, uint64_t uRowStart, std::shared_ptr<util::FileReader_c> & pReader, std::shared_ptr<util::IntCodec_i> & pCodec, const common::RowidRange_t * pBounds, bool bCreateReader, std::string & sError );
 }
