@@ -516,15 +516,9 @@ private:
 
 	inline int ScanBit ( T tData, int iStart )
 	{
-		int iBit = 0;
-		while ( tData )
-		{
-			if ( tData & 1 )
-				return iBit;
-
-			tData >>= 1;
-			iBit++;
-		}
+		for ( int i = iStart; i < SIZEBITS; i++ )
+			if ( tData & ( (T)1<<i ) )
+				return i;
 
 		return -1;
 	}
