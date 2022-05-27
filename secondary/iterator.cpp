@@ -56,7 +56,7 @@ private:
 	SpanResizeable_T<uint32_t>	m_dMinMax;
 	SpanResizeable_T<uint32_t>	m_dBlockOffsets;
 	SpanResizeable_T<uint32_t>	m_dTmp;
-	BitVec_c			m_dMatchingBlocks{0};
+	BitVec_T<uint64_t>	m_dMatchingBlocks{0};
 
 	bool	StartBlock ( Span_T<uint32_t> & dRowIdBlock );
 	bool	NextBlock ( Span_T<uint32_t> & dRowIdBlock );

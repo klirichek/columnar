@@ -435,23 +435,101 @@ void WriteVectorPacked ( const std::vector<uint64_t> & dData, WRITER & tWriter )
 
 bool FloatEqual ( float fA, float fB );
 
-class BitVec_c
+template <typename T>
+constexpr int Log2 ( T tValue )
+{
+	int iBits = 0;
+	while ( tValue )
+	{
+		tValue >>= 1;
+		iBits++;
+	}
+
+	return iBits;
+}
+
+template <typename T=uint32_t>
+class BitVec_T
 {
 public:
-	explicit	BitVec_c ( int iSize );
+	explicit BitVec_T ( int iSize ) { Resize(iSize); }
 
-	bool		BitGet ( int iBit );
-	void		BitSet ( int iBit );
+	inline bool BitGet ( int iBit )
+	{
+		if ( !m_dData.size() )
+			return false;
 
-	int			Scan ( int iStart );
-	void		SetAllBits();
-	void		Resize ( int iSize );
-	int			GetLength() const { return m_iSize; }
-	const std::vector<uint32_t> & GetData() const { return m_dData; }
+		assert ( iBit>=0 && iBit<m_iSize );
+		return ( ( m_dData [ iBit>>SHIFT ] & ( ( (T)1 )<<( iBit&MASK ) ) )!=0 );
+	}
+
+	inline void BitSet ( int iBit )
+	{
+		if ( !m_dData.size() )
+			return;
+
+		assert ( iBit>=0 && iBit<m_iSize );
+		m_dData [ iBit>>SHIFT ] |= ( ( (uint32_t)1 )<<( iBit&MASK ) );
+	}
+
+	int Scan ( int iStart )
+	{
+		assert ( iStart<m_iSize );
+
+		const T * pData = &m_dData.front();
+		int iIndex = iStart>>SHIFT;
+		T uMask = ~( ( 1<<( iStart&MASK ) )-1 );
+		if ( pData[iIndex] & uMask )
+			return (iIndex<<SHIFT) + ScanBit ( pData[iIndex], iStart&MASK );
+
+		iIndex++;
+		while ( iIndex<(int)m_dData.size() && !pData[iIndex] )
+			iIndex++;
+
+		if ( iIndex>=(int)m_dData.size() )
+			return m_iSize;
+
+		return (iIndex<<SHIFT) + ScanBit ( pData[iIndex], 0 );
+	}
+
+	void SetAllBits() { std::fill ( m_dData.begin(), m_dData.end(), (T)0xffffffffffffffffULL ); }
+	void Resize ( int iSize )
+	{
+		m_iSize = iSize;
+		if ( iSize )
+		{
+			int iCount = ( iSize+SIZEBITS-1 )/SIZEBITS;
+			m_dData = std::vector<T> ( iCount, 0 );
+		}
+	}
+
+	int	GetLength() const { return m_iSize; }
+	const std::vector<T> & GetData() const { return m_dData; }
 
 private:
-	std::vector<uint32_t> m_dData;
-	int			m_iSize = 0;
+	static const size_t	SIZEBITS = sizeof(T)*8;
+	static const T		MASK = T(sizeof(T)*8 - 1);
+	static constexpr T	SHIFT = T(Log2(SIZEBITS)-1);
+
+	std::vector<T>	m_dData;
+	int				m_iSize = 0;
+
+	inline int ScanBit ( T tData, int iStart )
+	{
+		int iBit = 0;
+		while ( tData )
+		{
+			if ( tData & 1 )
+				return iBit;
+
+			tData >>= 1;
+			iBit++;
+		}
+
+		return -1;
+	}
 };
+
+using BitVec_c = BitVec_T<>;
 
 } // namespace util
