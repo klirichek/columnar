@@ -104,7 +104,43 @@ struct FloatValueCmp_t
 
 /////////////////////////////////////////////////////////////////////
 
-class BlockReader_c : public BlockReader_i
+class ReaderTraits_c : public BlockReader_i
+{
+public:
+						ReaderTraits_c ( std::shared_ptr<IntCodec_i> & pCodec, uint64_t uBlockBaseOff, const RowidRange_t * pBounds );
+
+	const std::string &	GetWarning() const override { return m_sWarning; }
+
+protected:
+	std::string					m_sWarning;
+	std::shared_ptr<IntCodec_i>	m_pCodec { nullptr };
+	uint64_t					m_uBlockBaseOff = 0;
+
+	RowidRange_t				m_tBounds;
+	bool						m_bHaveBounds = false;
+
+	SpanResizeable_T<uint32_t> m_dTypes;
+	SpanResizeable_T<uint32_t> m_dMin;
+	SpanResizeable_T<uint32_t> m_dMax;
+	SpanResizeable_T<uint32_t> m_dRowStart;
+
+	SpanResizeable_T<uint32_t> m_dBufTmp;
+};
+
+
+ReaderTraits_c::ReaderTraits_c ( std::shared_ptr<IntCodec_i> & pCodec, uint64_t uBlockBaseOff, const RowidRange_t * pBounds )
+	: m_pCodec ( pCodec )
+	, m_uBlockBaseOff ( uBlockBaseOff )
+{
+	assert ( m_pCodec.get() );
+	m_bHaveBounds = !!pBounds;
+	if ( m_bHaveBounds )
+		m_tBounds = *pBounds;
+}
+
+/////////////////////////////////////////////////////////////////////
+
+class BlockReader_c : public ReaderTraits_c
 {
 public:
 				BlockReader_c ( std::shared_ptr<IntCodec_i> & pCodec, uint64_t uBlockBaseOff, const RowidRange_t * pBounds );
@@ -112,26 +148,14 @@ public:
 	bool		Open ( const std::string & sFileName, std::string & sError ) override;
 	void		CreateBlocksIterator ( const BlockIter_t & tIt, std::vector<BlockIterator_i *> & dRes ) override;
 	void		CreateBlocksIterator ( const BlockIter_t & tIt, const Filter_t & tVal, std::vector<BlockIterator_i *> & dRes ) override { assert ( 0 && "Requesting range iterators from block reader" ); }
-	const std::string & GetWarning() const override { return m_sWarning; }
 
 protected:
 	std::shared_ptr<FileReader_c> m_pFileReader { nullptr };
-	std::shared_ptr<IntCodec_i>	m_pCodec { nullptr };
-	std::string			m_sWarning;
-
-	SpanResizeable_T<uint32_t> m_dTypes;
-	SpanResizeable_T<uint32_t> m_dRowStart;
-
-	SpanResizeable_T<uint32_t> m_dBufTmp;
 		
-	uint64_t				m_uBlockBaseOff { 0 };
 	std::vector<uint64_t>	m_dBlockOffsets;
 	int						m_iLoadedBlock { -1 };
 	int						m_iStartBlock { -1 };
 	int64_t					m_iOffPastValues { -1 };
-
-	RowidRange_t			m_tBounds;
-	bool					m_bHaveBounds = false;
 
 	// interface for value related methods
 	virtual void			LoadValues () = 0;
@@ -143,14 +167,8 @@ protected:
 
 
 BlockReader_c::BlockReader_c ( std::shared_ptr<IntCodec_i> & pCodec, uint64_t uBlockBaseOff, const RowidRange_t * pBounds )
-	: m_pCodec ( pCodec )
-	, m_uBlockBaseOff ( uBlockBaseOff )
-{
-	assert ( m_pCodec.get() );
-	m_bHaveBounds = !!pBounds;
-	if ( m_bHaveBounds )
-		m_tBounds = *pBounds;
-}
+	: ReaderTraits_c ( pCodec, uBlockBaseOff, pBounds )
+{}
 
 
 bool BlockReader_c::Open ( const std::string & sFileName, std::string & sError )
@@ -171,7 +189,11 @@ int BlockReader_c::BlockLoadCreateIterator ( int iBlock, uint64_t uVal, std::vec
 
 	auto [iItem, iCmp] = FindValue ( uVal );
 	if ( iItem!=-1 )
-		dRes.emplace_back ( CreateIterator ( iItem ) );
+	{
+		auto * pIterator = CreateIterator(iItem);
+		if ( pIterator )
+			dRes.push_back(pIterator);
+	}
 
 	return iCmp;
 }
@@ -226,15 +248,12 @@ BlockIterator_i * BlockReader_c::CreateIterator ( int iItem )
 		m_iOffPastValues = -1;
 
 		DecodeBlockWoDelta ( m_dTypes, m_pCodec.get(), m_dBufTmp, *m_pFileReader.get() );
-
-		bool bLenDelta = !!m_pFileReader->Read_uint8();
-		if ( bLenDelta )
-			DecodeBlock ( m_dRowStart, m_pCodec.get(), m_dBufTmp, *m_pFileReader.get() );
-		else
-			DecodeBlockWoDelta ( m_dRowStart, m_pCodec.get(), m_dBufTmp, *m_pFileReader.get() );
+		DecodeBlock ( m_dMin, m_pCodec.get(), m_dBufTmp, *m_pFileReader.get() );
+		DecodeBlock ( m_dMax, m_pCodec.get(), m_dBufTmp, *m_pFileReader.get() );
+		DecodeBlock ( m_dRowStart, m_pCodec.get(), m_dBufTmp, *m_pFileReader.get() );
 	}
 
-	return CreateRowidIterator ( (Packing_e)m_dTypes[iItem], m_dRowStart[iItem], m_pFileReader, m_pCodec, m_bHaveBounds ? &m_tBounds : nullptr, m_sWarning.empty(), m_sWarning );
+	return CreateRowidIterator ( (Packing_e)m_dTypes[iItem], m_dRowStart[iItem], m_dMin[iItem], m_dMax[iItem], m_pFileReader, m_pCodec, m_bHaveBounds ? &m_tBounds : nullptr, m_sWarning.empty(), m_sWarning );
 }
 
 /////////////////////////////////////////////////////////////////////
@@ -360,7 +379,7 @@ int CmpRange ( T tStart, T tEnd, const Filter_t & tRange )
 
 /////////////////////////////////////////////////////////////////////
 
-class RangeReader_c : public BlockReader_i
+class RangeReader_c : public ReaderTraits_c
 {
 public:
 				RangeReader_c ( std::shared_ptr<IntCodec_i> & pCodec, uint64_t uBlockBaseOff, const RowidRange_t * pBounds );
@@ -368,24 +387,11 @@ public:
 	bool		Open ( const std::string & sFileName, std::string & sError ) override;
 	void		CreateBlocksIterator ( const BlockIter_t & tIt, std::vector<BlockIterator_i *> & dRes ) override { assert ( 0 && "Requesting block iterators from range reader" ); }
 	void		CreateBlocksIterator ( const BlockIter_t & tIt, const Filter_t & tVal, std::vector<BlockIterator_i *> & dRes ) override;
-	const std::string & GetWarning() const override { return m_sWarning; }
 
 protected:
 	std::shared_ptr<FileReader_c> m_pOffReader { nullptr };
 	std::shared_ptr<FileReader_c> m_pBlockReader { nullptr };
-	std::string m_sWarning;
-
-	std::shared_ptr<IntCodec_i> m_pCodec { nullptr };
-
-	SpanResizeable_T<uint32_t> m_dTypes;
-	SpanResizeable_T<uint32_t> m_dRowStart;
-
-	SpanResizeable_T<uint32_t> m_dBufTmp;
 		
-	uint64_t		m_uBlockBaseOff = 0;
-	RowidRange_t	m_tBounds;
-	bool			m_bHaveBounds = false;
-
 	// interface for value related methods
 	virtual int		LoadValues () = 0;
 	virtual bool	EvalRangeValue ( int iItem, const Filter_t & tRange ) const = 0;
@@ -396,14 +402,8 @@ protected:
 
 
 RangeReader_c::RangeReader_c ( std::shared_ptr<IntCodec_i> & pCodec, uint64_t uBlockBaseOff, const RowidRange_t * pBounds )
-	: m_pCodec ( pCodec )
-	, m_uBlockBaseOff ( uBlockBaseOff )
-{
-	assert ( m_pCodec.get() );
-	m_bHaveBounds = !!pBounds;
-	if ( m_bHaveBounds )
-		m_tBounds = *pBounds;
-}
+	: ReaderTraits_c ( pCodec, uBlockBaseOff, pBounds )
+{}
 
 
 bool RangeReader_c::Open ( const std::string & sFileName, std::string & sError )
@@ -441,7 +441,10 @@ void RangeReader_c::CreateBlocksIterator ( const BlockIter_t & tIt, const Filter
 		{
 			if ( EvalRangeValue ( iValCur, tRange ) )
 			{
-				dRes.emplace_back ( CreateIterator ( iValCur, true ) );
+				auto pIterator = CreateIterator ( iValCur, true );
+				if ( pIterator )
+					dRes.push_back(pIterator);
+
 				iBlockItCreated = iBlockCur;
 				iValCur++;
 				break;
@@ -474,7 +477,10 @@ void RangeReader_c::CreateBlocksIterator ( const BlockIter_t & tIt, const Filter
 			{
 				for ( ; iValCur<iValCount; iValCur++ )
 				{
-					dRes.emplace_back ( CreateIterator ( iValCur, iBlockItCreated!=iBlockCur ) );
+					auto pIterator = CreateIterator ( iValCur, iBlockItCreated!=iBlockCur );
+					if ( pIterator )
+						dRes.push_back(pIterator);
+
 					iBlockItCreated = iBlockCur;
 				}
 			} else // case: values only inside the block matched, need to check every value
@@ -484,7 +490,10 @@ void RangeReader_c::CreateBlocksIterator ( const BlockIter_t & tIt, const Filter
 					if ( !EvalRangeValue ( iValCur, tRange ) )
 						return;
 
-					dRes.emplace_back ( CreateIterator ( iValCur, iBlockItCreated!=iBlockCur ) );
+					auto pIterator = CreateIterator ( iValCur, iBlockItCreated!=iBlockCur );
+					if ( pIterator )
+						dRes.push_back(pIterator);
+
 					iBlockItCreated = iBlockCur;
 				}
 
@@ -515,15 +524,12 @@ BlockIterator_i * RangeReader_c::CreateIterator ( int iItem, bool bLoad )
 	if ( bLoad )
 	{
 		DecodeBlockWoDelta ( m_dTypes, m_pCodec.get(), m_dBufTmp, *m_pBlockReader.get() );
-
-		bool bLenDelta = !!m_pBlockReader->Read_uint8();
-		if ( bLenDelta )
-			DecodeBlock ( m_dRowStart, m_pCodec.get(), m_dBufTmp, *m_pBlockReader.get() );
-		else
-			DecodeBlockWoDelta ( m_dRowStart, m_pCodec.get(), m_dBufTmp, *m_pBlockReader.get() );
+		DecodeBlock ( m_dMin, m_pCodec.get(), m_dBufTmp, *m_pBlockReader.get() );
+		DecodeBlock ( m_dMax, m_pCodec.get(), m_dBufTmp, *m_pBlockReader.get() );
+		DecodeBlock ( m_dRowStart, m_pCodec.get(), m_dBufTmp, *m_pBlockReader.get() );
 	}
 
-	return CreateRowidIterator ( (Packing_e)m_dTypes[iItem], m_dRowStart[iItem], m_pBlockReader, m_pCodec, m_bHaveBounds ? &m_tBounds : nullptr, m_sWarning.empty(), m_sWarning );
+	return CreateRowidIterator ( (Packing_e)m_dTypes[iItem], m_dRowStart[iItem], m_dMin[iItem], m_dMax[iItem], m_pBlockReader, m_pCodec, m_bHaveBounds ? &m_tBounds : nullptr, m_sWarning.empty(), m_sWarning );
 }
 
 /////////////////////////////////////////////////////////////////////
