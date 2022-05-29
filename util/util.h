@@ -469,7 +469,7 @@ public:
 			return;
 
 		assert ( iBit>=0 && iBit<m_iSize );
-		m_dData [ iBit>>SHIFT ] |= ( ( (uint32_t)1 )<<( iBit&MASK ) );
+		m_dData [ iBit>>SHIFT ] |= ( ( (T)1 )<<( iBit&MASK ) );
 	}
 
 	int Scan ( int iStart )
