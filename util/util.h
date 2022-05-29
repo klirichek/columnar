@@ -478,7 +478,7 @@ public:
 
 		const T * pData = &m_dData.front();
 		int iIndex = iStart>>SHIFT;
-		T uMask = ~( ( 1<<( iStart&MASK ) )-1 );
+		T uMask = ~( ( T(1)<<( iStart&MASK ) )-1 );
 		if ( pData[iIndex] & uMask )
 			return (iIndex<<SHIFT) + ScanBit ( pData[iIndex], iStart&MASK );
 
