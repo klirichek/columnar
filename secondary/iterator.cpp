@@ -63,6 +63,7 @@ private:
 
 	FORCE_INLINE void DecodeDeltaVector ( SpanResizeable_T<uint32_t> & dDecoded );
 	void	MarkMatchingBlocks();
+	bool	RewindToNextMatchingBlock();
 };
 
 template <bool ROWID_RANGE>
@@ -83,9 +84,35 @@ RowidIterator_T<ROWID_RANGE>::RowidIterator_T ( Packing_e eType, uint64_t uStart
 template <bool ROWID_RANGE>
 bool RowidIterator_T<ROWID_RANGE>::HintRowID ( uint32_t tRowID )
 {
-	//assert ( 0 && "NIY" );
-	// implement proper rewinding in all packings
-	return !m_bStopped;
+	if ( !m_bStarted )	return true;
+	if ( m_bStopped )	return false;
+
+	switch ( m_eType )
+	{
+	case Packing_e::ROW:		return tRowID<=m_dRows[0];
+	case Packing_e::ROW_BLOCK:	return tRowID<=m_uMaxRowID;
+	case Packing_e::ROW_BLOCKS_LIST:
+		if ( tRowID<=m_uMinRowID )
+			return true;
+
+		if ( tRowID>m_uMaxRowID )
+		{
+			m_bStopped = true;
+			return false;
+		}
+
+		do
+		{
+			if ( tRowID<=m_dMinMax[(m_iCurBlock<<1)+1] )
+				return true;
+		}
+		while ( RewindToNextMatchingBlock() );
+		return false;
+
+	default:
+		assert ( 0 && "Unknown block encoding" );
+		return false;
+	}
 }
 
 template <bool ROWID_RANGE>
@@ -149,7 +176,7 @@ bool RowidIterator_T<ROWID_RANGE>::StartBlock ( Span_T<uint32_t> & dRowIdBlock )
 			return false;
 		}
 
-		m_iCurBlock = 0;
+		m_iCurBlock = -1;
 		return NextBlock(dRowIdBlock);
 
 	default:
@@ -162,11 +189,9 @@ bool RowidIterator_T<ROWID_RANGE>::StartBlock ( Span_T<uint32_t> & dRowIdBlock )
 }
 
 template <bool ROWID_RANGE>
-bool RowidIterator_T<ROWID_RANGE>::NextBlock ( Span_T<uint32_t> & dRowIdBlock )
+bool RowidIterator_T<ROWID_RANGE>::RewindToNextMatchingBlock()
 {
-	assert ( m_bStarted && !m_bStopped );
-	assert ( m_eType==Packing_e::ROW_BLOCKS_LIST );
-
+	m_iCurBlock++;
 	if ( m_iCurBlock>=m_dMatchingBlocks.GetLength() )
 	{
 		m_bStopped = true;
@@ -180,6 +205,18 @@ bool RowidIterator_T<ROWID_RANGE>::NextBlock ( Span_T<uint32_t> & dRowIdBlock )
 		return false;
 	}
 
+	return true;
+}
+
+template <bool ROWID_RANGE>
+bool RowidIterator_T<ROWID_RANGE>::NextBlock ( Span_T<uint32_t> & dRowIdBlock )
+{
+	assert ( m_bStarted && !m_bStopped );
+	assert ( m_eType==Packing_e::ROW_BLOCKS_LIST );
+
+	if ( !RewindToNextMatchingBlock() )
+		return false;
+
 	int64_t iBlockSize = m_dBlockOffsets[m_iCurBlock];
 	int64_t iBlockOffset = m_iCurBlock ? ( m_dBlockOffsets[m_iCurBlock-1]): 0;
 	iBlockSize -= iBlockOffset;
@@ -190,8 +227,6 @@ bool RowidIterator_T<ROWID_RANGE>::NextBlock ( Span_T<uint32_t> & dRowIdBlock )
 	ReadVectorData ( m_dTmp, *m_pReader );
 	m_pCodec->Decode ( m_dTmp, m_dRows );
 	ComputeInverseDeltas ( m_dRows, true );
-
-	m_iCurBlock++;
 
 	dRowIdBlock = Span_T<uint32_t>(m_dRows);
 	return ( !dRowIdBlock.empty() );
