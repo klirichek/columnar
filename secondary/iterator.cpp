@@ -50,6 +50,7 @@ private:
 
 	bool				m_bStarted = false;
 	bool				m_bStopped = false;
+	bool				m_bNeedToRewind = true;
 
 	int					m_iCurBlock = 0;
 	SpanResizeable_T<uint32_t>	m_dRows;
@@ -59,7 +60,7 @@ private:
 	BitVec_T<uint64_t>	m_dMatchingBlocks{0};
 
 	bool	StartBlock ( Span_T<uint32_t> & dRowIdBlock );
-	bool	NextBlock ( Span_T<uint32_t> & dRowIdBlock );
+	bool	ReadNextBlock ( Span_T<uint32_t> & dRowIdBlock );
 
 	FORCE_INLINE void DecodeDeltaVector ( SpanResizeable_T<uint32_t> & dDecoded );
 	void	MarkMatchingBlocks();
@@ -104,7 +105,10 @@ bool RowidIterator_T<ROWID_RANGE>::HintRowID ( uint32_t tRowID )
 		do
 		{
 			if ( tRowID<=m_dMinMax[(m_iCurBlock<<1)+1] )
+			{
+				m_bNeedToRewind = false;
 				return true;
+			}
 		}
 		while ( RewindToNextMatchingBlock() );
 		return false;
@@ -120,10 +124,15 @@ bool RowidIterator_T<ROWID_RANGE>::GetNextRowIdBlock ( Span_T<uint32_t> & dRowId
 {
 	if ( m_bStopped )
 		return false;
+
 	if ( !m_bStarted )
 		return StartBlock ( dRowIdBlock );
 
-	return NextBlock ( dRowIdBlock );
+	if ( m_bNeedToRewind && !RewindToNextMatchingBlock() )
+		return false;
+
+	m_bNeedToRewind = true;
+	return ReadNextBlock ( dRowIdBlock );
 }
 
 template<>
@@ -176,8 +185,8 @@ bool RowidIterator_T<ROWID_RANGE>::StartBlock ( Span_T<uint32_t> & dRowIdBlock )
 			return false;
 		}
 
-		m_iCurBlock = -1;
-		return NextBlock(dRowIdBlock);
+		m_iCurBlock = 0;
+		return ReadNextBlock(dRowIdBlock);
 
 	default:
 		m_bStopped = true;
@@ -209,13 +218,10 @@ bool RowidIterator_T<ROWID_RANGE>::RewindToNextMatchingBlock()
 }
 
 template <bool ROWID_RANGE>
-bool RowidIterator_T<ROWID_RANGE>::NextBlock ( Span_T<uint32_t> & dRowIdBlock )
+bool RowidIterator_T<ROWID_RANGE>::ReadNextBlock ( Span_T<uint32_t> & dRowIdBlock )
 {
 	assert ( m_bStarted && !m_bStopped );
 	assert ( m_eType==Packing_e::ROW_BLOCKS_LIST );
-
-	if ( !RewindToNextMatchingBlock() )
-		return false;
 
 	int64_t iBlockSize = m_dBlockOffsets[m_iCurBlock];
 	int64_t iBlockOffset = m_iCurBlock ? ( m_dBlockOffsets[m_iCurBlock-1]): 0;
