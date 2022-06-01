@@ -61,7 +61,7 @@ install ( TARGETS secondary_api EXPORT SecondaryExport COMPONENT module )
 # ensure ALL externally required headers are exported here
 install ( FILES columnar/builder.h columnar/columnar.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${CPACK_PACKAGE_NAME}/columnar COMPONENT dev )
 install ( FILES util/util.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${CPACK_PACKAGE_NAME}/util COMPONENT dev )
-install ( FILES common/schema.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${CPACK_PACKAGE_NAME}/common COMPONENT dev )
+install ( FILES common/schema.h common/blockiterator.h common/filter.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${CPACK_PACKAGE_NAME}/common COMPONENT dev )
 install ( FILES secondary/secondary.h secondary/common.h secondary/builder.h secondary/iterator.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${CPACK_PACKAGE_NAME}/secondary COMPONENT dev )
 
 add_library ( columnar::columnar_api ALIAS columnar_api )
