@@ -25,8 +25,6 @@ namespace SI
 using namespace util;
 using namespace common;
 
-static const int g_iBlocksReaderBufSize { 1024 };
-
 template <bool ROWID_RANGE>
 class RowidIterator_T : public BlockIterator_i
 {
@@ -255,21 +253,24 @@ void RowidIterator_T<ROWID_RANGE>::DecodeDeltaVector ( SpanResizeable_T<uint32_t
 
 /////////////////////////////////////////////////////////////////////
 
-BlockIterator_i * CreateRowidIterator ( Packing_e eType, uint64_t uStartOffset, uint32_t uMinRowID, uint32_t uMaxRowID, std::shared_ptr<FileReader_c> & pReader, std::shared_ptr<IntCodec_i> & pCodec, const RowidRange_t * pBounds, bool bCreateReader, std::string & sError )
+BlockIterator_i * CreateRowidIterator ( Packing_e eType, uint64_t uStartOffset, uint32_t uMinRowID, uint32_t uMaxRowID, std::shared_ptr<FileReader_c> & pSharedReader, std::shared_ptr<IntCodec_i> & pCodec, const RowidRange_t * pBounds )
 {
-/*	! create readers with different block sizes
-		! ROW = no reader
-		! ROW_BLOCK = shared reader with a buffer of 1-2kb
-		! ROW_BLOCKS_LIST = reader with default buffer
-		*/
-	std::shared_ptr<FileReader_c> tBlocksReader { nullptr };
-	if ( bCreateReader && eType==Packing_e::ROW_BLOCKS_LIST )
+	static const int BLOCK_READER_BUFFER = 4096;
+
+	std::shared_ptr<FileReader_c> pReader;
+	switch ( eType )
 	{
-		tBlocksReader.reset ( new FileReader_c() );
-		if ( !tBlocksReader->Open ( pReader->GetFilename(), g_iBlocksReaderBufSize, sError ) )
-			tBlocksReader.reset();
-		else
-			tBlocksReader->Seek ( pReader->GetPos() );
+	case Packing_e::ROW_BLOCK:
+		pReader = pSharedReader;
+		break;
+
+	case Packing_e::ROW_BLOCKS_LIST:
+		pReader = std::make_shared<FileReader_c>( pSharedReader->GetFD(), BLOCK_READER_BUFFER );
+		pReader->Seek ( pSharedReader->GetPos() );
+		break;
+
+	default:
+		break;
 	}
 
 	if ( pBounds )
@@ -278,10 +279,10 @@ BlockIterator_i * CreateRowidIterator ( Packing_e eType, uint64_t uStartOffset, 
 		if ( !tRowidBounds.Overlaps ( { uMinRowID, uMaxRowID } ) )
 			return nullptr;
 
-		return new RowidIterator_T<true> ( eType, uStartOffset, uMinRowID, uMaxRowID, ( tBlocksReader ? tBlocksReader : pReader ), pCodec, pBounds );
+		return new RowidIterator_T<true> ( eType, uStartOffset, uMinRowID, uMaxRowID, pReader, pCodec, pBounds );
 	}
 
-	return new RowidIterator_T<false> ( eType, uStartOffset, uMinRowID, uMaxRowID, ( tBlocksReader ? tBlocksReader : pReader ), pCodec );
+	return new RowidIterator_T<false> ( eType, uStartOffset, uMinRowID, uMaxRowID, pReader, pCodec );
 }
 
 }

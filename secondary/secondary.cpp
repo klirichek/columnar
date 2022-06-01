@@ -61,6 +61,8 @@ private:
 	uint64_t	m_uMetaOff { 0 };
 	uint64_t	m_uNextMetaOff { 0 };
 
+	util::FileReader_c m_tReader;
+
 	std::vector<ColumnInfo_t> m_dAttrs;
 	bool m_bUpdated { false };
 	std::unordered_map<std::string, int> m_hAttrs;
@@ -71,18 +73,17 @@ private:
 
 	std::string m_sFileName;
 
-	bool	GetValsRows ( std::vector<BlockIterator_i *> & dIterators, const Filter_t & tFilter, const RowidRange_t * pBounds, std::string & sError ) const;
-	bool	GetRangeRows ( std::vector<BlockIterator_i *> & dIterators, const Filter_t & tFilter, const RowidRange_t * pBounds, std::string & sError ) const;
+	void	GetValsRows ( std::vector<BlockIterator_i *> & dIterators, const Filter_t & tFilter, const RowidRange_t * pBounds ) const;
+	void	GetRangeRows ( std::vector<BlockIterator_i *> & dIterators, const Filter_t & tFilter, const RowidRange_t * pBounds ) const;
 	int		GetColumnId ( const std::string & sName ) const;
 };
 
 bool SecondaryIndex_c::Setup ( const std::string & sFile, std::string & sError )
 {
-	util::FileReader_c tReader;
-	if ( !tReader.Open ( sFile, sError ) )
+	if ( !m_tReader.Open ( sFile, sError ) )
 		return false;
 
-	uint32_t uVersion = tReader.Read_uint32();
+	uint32_t uVersion = m_tReader.Read_uint32();
 	if ( uVersion>LIB_VERSION )
 	{
 		sError = FormatStr ( "Unable to load inverted index: %s is v.%d, binary is v.%d", sFile.c_str(), uVersion, LIB_VERSION );
@@ -90,32 +91,32 @@ bool SecondaryIndex_c::Setup ( const std::string & sFile, std::string & sError )
 	}
 		
 	m_sFileName = sFile;
-	m_uMetaOff = tReader.Read_uint64();
+	m_uMetaOff = m_tReader.Read_uint64();
 		
-	tReader.Seek ( m_uMetaOff );
+	m_tReader.Seek ( m_uMetaOff );
 
 	// raw non packed data first
-	m_uNextMetaOff = tReader.Read_uint64();
-	int iAttrsCount = tReader.Read_uint32();
+	m_uNextMetaOff = m_tReader.Read_uint64();
+	int iAttrsCount = m_tReader.Read_uint32();
 
 	BitVec_c dAttrsEnabled ( iAttrsCount );
-	ReadVectorData ( dAttrsEnabled.GetData(), tReader );
+	ReadVectorData ( dAttrsEnabled.GetData(), m_tReader );
 
-	m_tSettings.Load(tReader);
-	m_iValuesPerBlock = tReader.Read_uint32();
+	m_tSettings.Load(m_tReader);
+	m_iValuesPerBlock = m_tReader.Read_uint32();
 
 	m_dAttrs.resize ( iAttrsCount );
 	for ( int i=0; i<iAttrsCount; i++ )
 	{
 		ColumnInfo_t & tAttr = m_dAttrs[i];
-		tAttr.m_sName = tReader.Read_string();
-		tAttr.m_eType = (AttrType_e)tReader.Unpack_uint32();
+		tAttr.m_sName = m_tReader.Read_string();
+		tAttr.m_eType = (AttrType_e)m_tReader.Unpack_uint32();
 		tAttr.m_bEnabled = dAttrsEnabled.BitGet ( i );
 	}
 
-	ReadVectorPacked ( m_dBlockStartOff, tReader );
+	ReadVectorPacked ( m_dBlockStartOff, m_tReader );
 	ComputeInverseDeltas ( m_dBlockStartOff, true );
-	ReadVectorPacked ( m_dBlocksCount, tReader );
+	ReadVectorPacked ( m_dBlocksCount, m_tReader );
 
 	m_dIdx.resize ( m_dAttrs.size() );
 	for ( int i=0; i<m_dIdx.size(); i++ )
@@ -148,23 +149,23 @@ bool SecondaryIndex_c::Setup ( const std::string & sFile, std::string & sError )
 				return false;
 		}
 
-		int64_t iPgmLen = tReader.Unpack_uint64();
-		int64_t iPgmEnd = tReader.GetPos() + iPgmLen;
-		m_dIdx[i]->Load ( tReader );
-		if ( tReader.GetPos()!=iPgmEnd )
+		int64_t iPgmLen = m_tReader.Unpack_uint64();
+		int64_t iPgmEnd = m_tReader.GetPos() + iPgmLen;
+		m_dIdx[i]->Load ( m_tReader );
+		if ( m_tReader.GetPos()!=iPgmEnd )
 		{
-			sError = FormatStr ( "Out of bounds on loading PGM for attribute '%s'(%d), end expected %ll got %ll", tCol.m_sName.c_str(), i, iPgmEnd, tReader.GetPos() );
+			sError = FormatStr ( "Out of bounds on loading PGM for attribute '%s'(%d), end expected %ll got %ll", tCol.m_sName.c_str(), i, iPgmEnd, m_tReader.GetPos() );
 			return false;
 		}
 
 		m_hAttrs.insert ( { tCol.m_sName, i } );
 	}
 
-	m_iBlocksBase = tReader.GetPos();
+	m_iBlocksBase = m_tReader.GetPos();
 
-	if ( tReader.IsError() )
+	if ( m_tReader.IsError() )
 	{
-		sError = tReader.GetError();
+		sError = m_tReader.GetError();
 		return false;
 	}
 
@@ -228,7 +229,7 @@ void SecondaryIndex_c::ColumnUpdated ( const char * sName )
 }
 
 
-bool SecondaryIndex_c::GetValsRows ( std::vector<BlockIterator_i *> & dIterators,  const Filter_t & tFilter, const RowidRange_t * pBounds, std::string & sError ) const
+void SecondaryIndex_c::GetValsRows ( std::vector<BlockIterator_i *> & dIterators,  const Filter_t & tFilter, const RowidRange_t * pBounds ) const
 {
 	int iCol = GetColumnId ( tFilter.m_sName );
 	assert ( iCol>=0 );
@@ -239,10 +240,7 @@ bool SecondaryIndex_c::GetValsRows ( std::vector<BlockIterator_i *> & dIterators
 	uint64_t uBlockBaseOff = m_iBlocksBase + m_dBlockStartOff[iCol];
 	uint64_t uBlocksCount = m_dBlocksCount[iCol];
 
-	std::unique_ptr<BlockReader_i> pBlockReader { CreateBlockReader ( tCol.m_eType, m_tSettings, uBlockBaseOff, pBounds ) } ;
-	if ( !pBlockReader->Open ( m_sFileName, sError ) )
-		return false;
-
+	std::unique_ptr<BlockReader_i> pBlockReader { CreateBlockReader ( m_tReader.GetFD(), tCol.m_eType, m_tSettings, uBlockBaseOff, pBounds ) } ;
 	std::vector<BlockIter_t> dBlocksIt;
  	for ( const uint64_t uVal : tFilter.m_dValues )
 		dBlocksIt.emplace_back ( BlockIter_t ( m_dIdx[iCol]->Search ( uVal ), uVal, uBlocksCount, m_iValuesPerBlock ) );
@@ -252,14 +250,10 @@ bool SecondaryIndex_c::GetValsRows ( std::vector<BlockIterator_i *> & dIterators
 
 	for ( int i=0; i<dBlocksIt.size(); i++ )
 		pBlockReader->CreateBlocksIterator ( dBlocksIt[i], dIterators );
-
-	sError = pBlockReader->GetWarning();
-
-	return true;
 }
 
 
-bool SecondaryIndex_c::GetRangeRows ( std::vector<BlockIterator_i *> & dIterators,  const Filter_t & tFilter, const RowidRange_t * pBounds, std::string & sError ) const
+void SecondaryIndex_c::GetRangeRows ( std::vector<BlockIterator_i *> & dIterators,  const Filter_t & tFilter, const RowidRange_t * pBounds ) const
 {
 	int iCol = GetColumnId ( tFilter.m_sName );
 	assert ( iCol>=0 );
@@ -295,14 +289,8 @@ bool SecondaryIndex_c::GetRangeRows ( std::vector<BlockIterator_i *> & dIterator
 
 	BlockIter_t tPosIt ( tPos, 0, uBlocksCount, m_iValuesPerBlock );
 
-	std::unique_ptr<BlockReader_i> pReader { CreateRangeReader ( tCol.m_eType, m_tSettings, uBlockBaseOff, pBounds ) } ;
-	if ( !pReader->Open ( m_sFileName, sError ) )
-		return false;
-
+	std::unique_ptr<BlockReader_i> pReader { CreateRangeReader ( m_tReader.GetFD(), tCol.m_eType, m_tSettings, uBlockBaseOff, pBounds ) };
 	pReader->CreateBlocksIterator ( tPosIt, tFilter, dIterators );
-	sError = pReader->GetWarning();
-
-	return true;
 }
 
 
@@ -331,11 +319,13 @@ bool SecondaryIndex_c::CreateIterators ( std::vector<BlockIterator_i *> & dItera
 	switch ( tFixedFilter.m_eType )
 	{
 	case FilterType_e::VALUES:
-		return GetValsRows ( dIterators, tFilter, pBounds, sError );
+		GetValsRows ( dIterators, tFilter, pBounds );
+		return true;
 
 	case FilterType_e::RANGE:
 	case FilterType_e::FLOATRANGE:
-		return GetRangeRows ( dIterators, tFilter, pBounds, sError );
+		GetRangeRows ( dIterators, tFilter, pBounds );
+		return true;
 
 	default:
 		sError = FormatStr ( "unhandled filter type '%d'", to_underlying ( tFixedFilter.m_eType ) );

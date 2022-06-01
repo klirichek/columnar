@@ -26,7 +26,7 @@ class FileReader_c
 {
 public:
 							FileReader_c() = default;
-	explicit				FileReader_c ( int iFD );
+	explicit				FileReader_c ( int iFD, size_t tBufferSize = DEFAULT_SIZE );
 							~FileReader_c() { Close(); }
 
 	bool					Open ( const std::string & sName, std::string & sError );

@@ -78,8 +78,9 @@ static int PreadWrapper ( int iFD, void * pBuf, size_t tCount, off_t tOff )
 #endif	// _MSC_VER
 
 
-FileReader_c::FileReader_c ( int iFD )
+FileReader_c::FileReader_c ( int iFD, size_t tBufferSize )
 	: m_iFD ( iFD )
+	, m_tSize ( tBufferSize )
 {
 	assert ( iFD>=0 );
 }
