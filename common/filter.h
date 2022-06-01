@@ -17,6 +17,7 @@
 #pragma once
 
 #include "schema.h"
+#include <limits>
 
 namespace common
 {

@@ -55,7 +55,7 @@ namespace SI
 		{
 			size_t uOff = dData.size();
 
-			MemWriter_c tWr ( dData );
+			util::MemWriter_c tWr ( dData );
 
 			tWr.Pack_uint32 ( (int)this->n );
 			WriteTypedKey ( tWr, this->first_key );
@@ -64,7 +64,7 @@ namespace SI
 			for ( const auto & tSeg : this->segments )
 			{
 				WriteTypedKey ( tWr, tSeg.key );
-				tWr.Pack_uint32 ( FloatToUint ( tSeg.slope ) );
+				tWr.Pack_uint32 ( util::FloatToUint ( tSeg.slope ) );
 				tWr.Pack_uint32 ( tSeg.intercept );
 			}
 
@@ -88,7 +88,7 @@ namespace SI
 			for ( auto & tSeg : this->segments )
 			{
 				LoadTypedKey ( tRd, tSeg.key );
-				tSeg.slope = UintToFloat ( tRd.Unpack_uint32() );
+				tSeg.slope = util::UintToFloat ( tRd.Unpack_uint32() );
 				tSeg.intercept = tRd.Unpack_uint32();
 			}
 

@@ -116,14 +116,14 @@ void PackerTraits_T<HEADER>::Done()
 template <typename HEADER>
 bool PackerTraits_T<HEADER>::WriteHeader ( util::FileWriter_c & tWriter, std::string & sError )
 {
-	tWriter.Write_uint32 ( to_underlying ( m_tHeader.GetType() ) );
+	tWriter.Write_uint32 ( util::to_underlying ( m_tHeader.GetType() ) );
 	return m_tHeader.Save ( tWriter, m_iBaseOffset, sError );
 }
 
 template <typename HEADER>
 bool PackerTraits_T<HEADER>::WriteBody ( const std::string & sDest, std::string & sError ) const
 {
-	return CopySingleFile ( m_tWriter.GetFilename(), sDest, sError, O_CREAT | O_RDWR | O_APPEND | O_BINARY );
+	return util::CopySingleFile ( m_tWriter.GetFilename(), sDest, sError, O_CREAT | O_RDWR | O_APPEND | O_BINARY );
 }
 
 template <typename HEADER>
@@ -150,7 +150,7 @@ static void WriteValues_Delta_PFOR ( const util::Span_T<T> & dValues, std::vecto
 {
 	dTmpUncompressed.resize ( dValues.size() );
 	memcpy ( dTmpUncompressed.data(), dValues.data(), dValues.size()*sizeof ( dValues[0] ) );
-	ComputeDeltas ( dTmpUncompressed.data(), (int)dTmpUncompressed.size(), true );
+	util::ComputeDeltas ( dTmpUncompressed.data(), (int)dTmpUncompressed.size(), true );
 
 	T uMin = dTmpUncompressed[0];
 	dTmpUncompressed[0]=0;
@@ -159,7 +159,7 @@ static void WriteValues_Delta_PFOR ( const util::Span_T<T> & dValues, std::vecto
 	pCodec->Encode ( dTmpUncompressed, dTmpCompressed );
 
 	// write the length of encoded data
-	tWriter.Pack_uint64 ( dTmpCompressed.size()*sizeof ( dTmpCompressed[0] ) + ByteCodec_c::CalcPackedLen(uMin) );
+	tWriter.Pack_uint64 ( dTmpCompressed.size()*sizeof ( dTmpCompressed[0] ) + util::ByteCodec_c::CalcPackedLen(uMin) );
 	tWriter.Pack_uint64(uMin);
 	tWriter.Write ( (const uint8_t*)dTmpCompressed.data(), dTmpCompressed.size()*sizeof ( dTmpCompressed[0] ) );
 }
@@ -179,7 +179,7 @@ static void WriteValues_PFOR ( const util::Span_T<T> & dValues, std::vector<T> &
 	pCodec->Encode ( dTmpUncompressed, dTmpCompressed );
 
 	if ( bWriteLength )
-		tWriter.Pack_uint64 ( dTmpCompressed.size()*sizeof ( dTmpCompressed[0] ) + ByteCodec_c::CalcPackedLen(uMin) );
+		tWriter.Pack_uint64 ( dTmpCompressed.size()*sizeof ( dTmpCompressed[0] ) + util::ByteCodec_c::CalcPackedLen(uMin) );
 
 	tWriter.Pack_uint64(uMin);
 	tWriter.Write ( (const uint8_t*)dTmpCompressed.data(), dTmpCompressed.size()*sizeof ( dTmpCompressed[0] ) );
@@ -189,7 +189,7 @@ template <typename UNIQ_VEC, typename UNIQ_HASH, typename COLLECTED>
 void WriteTableOrdinals ( UNIQ_VEC & dUniques, UNIQ_HASH & hUnique, COLLECTED & dCollected, std::vector<uint32_t> & dTableIndexes, std::vector<uint32_t> & dCompressed, int iSubblockSize, util::FileWriter_c & tWriter )
 {
 	// write the ordinals
-	int iBits = CalcNumBits ( dUniques.size() );
+	int iBits = util::CalcNumBits ( dUniques.size() );
 	dCompressed.resize ( ( dTableIndexes.size()*iBits + 31 ) >> 5 );
 
 	int iId = 0;
@@ -202,7 +202,7 @@ void WriteTableOrdinals ( UNIQ_VEC & dUniques, UNIQ_HASH & hUnique, COLLECTED & 
 		dTableIndexes[iId++] = tFound->second;
 		if ( iId==iSubblockSize )
 		{
-			BitPack ( dTableIndexes, dCompressed, iBits );
+			util::BitPack ( dTableIndexes, dCompressed, iBits );
 			tWriter.Write ( (uint8_t*)dCompressed.data(), dCompressed.size()*sizeof(dCompressed[0]) );
 			iId = 0;
 		}
@@ -212,7 +212,7 @@ void WriteTableOrdinals ( UNIQ_VEC & dUniques, UNIQ_HASH & hUnique, COLLECTED & 
 	{
 		// zero out unused values
 		memset ( dTableIndexes.data()+iId, 0, (dTableIndexes.size()-iId)*sizeof(dTableIndexes[0]) );
-		BitPack ( dTableIndexes, dCompressed, iBits );
+		util::BitPack ( dTableIndexes, dCompressed, iBits );
 		tWriter.Write ( (uint8_t*)dCompressed.data(), dCompressed.size()*sizeof(dCompressed[0]) );
 	}
 }

@@ -59,12 +59,12 @@ private:
 	SpanResizeable_T<uint32_t>	m_dTmp;
 	BitVec_T<uint64_t>	m_dMatchingBlocks{0};
 
-	bool	StartBlock ( Span_T<uint32_t> & dRowIdBlock );
-	bool	ReadNextBlock ( Span_T<uint32_t> & dRowIdBlock );
+	bool		StartBlock ( Span_T<uint32_t> & dRowIdBlock );
+	bool		ReadNextBlock ( Span_T<uint32_t> & dRowIdBlock );
 
 	FORCE_INLINE void DecodeDeltaVector ( SpanResizeable_T<uint32_t> & dDecoded );
-	void	MarkMatchingBlocks();
-	bool	RewindToNextMatchingBlock();
+	uint32_t	MarkMatchingBlocks();
+	bool		RewindToNextMatchingBlock();
 };
 
 template <bool ROWID_RANGE>
@@ -136,20 +136,27 @@ bool RowidIterator_T<ROWID_RANGE>::GetNextRowIdBlock ( Span_T<uint32_t> & dRowId
 }
 
 template<>
-void RowidIterator_T<false>::MarkMatchingBlocks()
+uint32_t RowidIterator_T<false>::MarkMatchingBlocks()
 {
 	m_dMatchingBlocks.Resize ( m_dBlockOffsets.size() );
 	m_dMatchingBlocks.SetAllBits();
+	return m_dBlockOffsets.size();
 }
 
 template<>
-void RowidIterator_T<true>::MarkMatchingBlocks()
+uint32_t RowidIterator_T<true>::MarkMatchingBlocks()
 {
+	uint32_t uSet = 0;
 	m_dMatchingBlocks.Resize ( m_dBlockOffsets.size() );
 	Interval_T<uint32_t> tRowidBounds ( m_tBounds.m_uMin, m_tBounds.m_uMax );
 	for ( size_t i = 0; i < m_dBlockOffsets.size(); i++ )
 		if ( tRowidBounds.Overlaps ( { m_dMinMax[i<<1], m_dMinMax[(i<<1)+1] } ) )
+		{
 			m_dMatchingBlocks.BitSet(i);
+			uSet++;
+		}
+
+	return uSet;
 }
 
 template <bool ROWID_RANGE>
@@ -178,8 +185,7 @@ bool RowidIterator_T<ROWID_RANGE>::StartBlock ( Span_T<uint32_t> & dRowIdBlock )
 		DecodeDeltaVector ( m_dBlockOffsets );
 		m_iDataOffset = m_pReader->GetPos();
 
-		MarkMatchingBlocks();
-		if ( !m_dMatchingBlocks.GetLength() )
+		if ( !MarkMatchingBlocks() )
 		{
 			m_bStopped = true;
 			return false;
@@ -251,6 +257,11 @@ void RowidIterator_T<ROWID_RANGE>::DecodeDeltaVector ( SpanResizeable_T<uint32_t
 
 BlockIterator_i * CreateRowidIterator ( Packing_e eType, uint64_t uStartOffset, uint32_t uMinRowID, uint32_t uMaxRowID, std::shared_ptr<FileReader_c> & pReader, std::shared_ptr<IntCodec_i> & pCodec, const RowidRange_t * pBounds, bool bCreateReader, std::string & sError )
 {
+/*	! create readers with different block sizes
+		! ROW = no reader
+		! ROW_BLOCK = shared reader with a buffer of 1-2kb
+		! ROW_BLOCKS_LIST = reader with default buffer
+		*/
 	std::shared_ptr<FileReader_c> tBlocksReader { nullptr };
 	if ( bCreateReader && eType==Packing_e::ROW_BLOCKS_LIST )
 	{

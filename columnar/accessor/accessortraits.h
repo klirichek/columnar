@@ -344,7 +344,7 @@ template <typename T>
 FORCE_INLINE void DecodeValues_Delta_PFOR ( util::SpanResizeable_T<T> & dValues, util::FileReader_c & tReader, util::IntCodec_i & tCodec, util::SpanResizeable_T<uint32_t> & dTmp, uint32_t uTotalSize, bool bReadFlag )
 {
 	int64_t tStart = tReader.GetPos();
-	uint8_t uFlags = to_underlying ( IntDeltaPacking_e::DELTA_ASC );
+	uint8_t uFlags = util::to_underlying ( IntDeltaPacking_e::DELTA_ASC );
 	if ( bReadFlag )
 		uFlags = tReader.Read_uint8();
 
@@ -359,7 +359,7 @@ FORCE_INLINE void DecodeValues_Delta_PFOR ( util::SpanResizeable_T<T> & dValues,
 
 	assert ( !dValues[0] );
 	dValues[0] = uMin;
-	ComputeInverseDeltas ( dValues, uFlags==to_underlying ( IntDeltaPacking_e::DELTA_ASC ) );
+	ComputeInverseDeltas ( dValues, uFlags==util::to_underlying ( IntDeltaPacking_e::DELTA_ASC ) );
 }
 
 template <typename T>
@@ -382,7 +382,7 @@ template <typename T, bool PACK>
 FORCE_INLINE uint32_t PackValue ( const util::Span_T<T> & dValue, uint8_t * & pValue )
 {
 	if ( PACK )
-		pValue = ByteCodec_c::PackData(dValue);
+		pValue = util::ByteCodec_c::PackData(dValue);
 	else
 		pValue = (uint8_t*)dValue.data();
 

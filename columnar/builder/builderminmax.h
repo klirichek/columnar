@@ -60,7 +60,7 @@ void MinMaxBuilder_T<T>::Add ( int64_t tValue )
 	if ( m_iCollected==m_tSettings.m_iSubblockSize )
 		Flush();
 
-	T tConverted = to_type<T>(tValue);
+	T tConverted = util::to_type<T>(tValue);
 
 	if ( !m_iCollected )
 	{
@@ -92,7 +92,7 @@ void MinMaxBuilder_T<T>::Add ( const int64_t * pValues, int iNumValues )
 	T tMin, tMax;
 	for ( int i = 0; i < iNumValues; i++ )
 	{
-		T tConverted = to_type<T>(pValues[i]);
+		T tConverted = util::to_type<T>(pValues[i]);
 		if ( i )
 		{
 			tMin = std::min ( tMin, tConverted );
