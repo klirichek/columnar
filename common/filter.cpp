@@ -79,8 +79,7 @@ Filter_t StringFilterToHashFilter ( const Filter_t & tFilter, bool bGenerateName
 
 	tRes.m_eType = FilterType_e::VALUES;
 	tRes.m_bExclude = tFilter.m_bExclude;
-	if ( bGenerateName )
-		tRes.m_sName = GenerateHashAttrName ( tFilter.m_sName );
+	tRes.m_sName = bGenerateName ?  GenerateHashAttrName ( tFilter.m_sName ) : tFilter.m_sName;
 
 	for ( const auto & i : tFilter.m_dStringValues )
 		tRes.m_dValues.push_back ( i.empty() ? 0 : tFilter.m_fnCalcStrHash ( i.data(), i.size(), STR_HASH_SEED ) );

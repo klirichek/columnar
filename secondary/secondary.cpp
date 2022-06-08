@@ -319,12 +319,12 @@ bool SecondaryIndex_c::CreateIterators ( std::vector<BlockIterator_i *> & dItera
 	switch ( tFixedFilter.m_eType )
 	{
 	case FilterType_e::VALUES:
-		GetValsRows ( dIterators, tFilter, pBounds );
+		GetValsRows ( dIterators, tFixedFilter, pBounds );
 		return true;
 
 	case FilterType_e::RANGE:
 	case FilterType_e::FLOATRANGE:
-		GetRangeRows ( dIterators, tFilter, pBounds );
+		GetRangeRows ( dIterators, tFixedFilter, pBounds );
 		return true;
 
 	default:

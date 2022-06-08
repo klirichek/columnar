@@ -77,7 +77,8 @@ RowidIterator_T<ROWID_RANGE>::RowidIterator_T ( Packing_e eType, uint64_t uStart
 	if ( pBounds )
 		m_tBounds = *pBounds;
 
-	m_iMetaOffset = m_pReader->GetPos();
+	if ( eType!=Packing_e::ROW )
+		m_iMetaOffset = m_pReader->GetPos();
 }
 
 template <bool ROWID_RANGE>
