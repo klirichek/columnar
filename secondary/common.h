@@ -23,7 +23,7 @@
 
 namespace SI
 {
-	static const int LIB_VERSION = 2;
+	static const int LIB_VERSION = 3;
 	static const uint32_t STORAGE_VERSION = 1;
 
 	struct ColumnInfo_t

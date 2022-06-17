@@ -52,7 +52,8 @@ private:
 
 	int					m_iCurBlock = 0;
 	SpanResizeable_T<uint32_t>	m_dRows;
-	SpanResizeable_T<uint32_t>	m_dMinMax;
+	SpanResizeable_T<uint32_t>	m_dMin;
+	SpanResizeable_T<uint32_t>	m_dMax;
 	SpanResizeable_T<uint32_t>	m_dBlockOffsets;
 	SpanResizeable_T<uint32_t>	m_dTmp;
 	BitVec_T<uint64_t>	m_dMatchingBlocks{0};
@@ -103,7 +104,7 @@ bool RowidIterator_T<ROWID_RANGE>::HintRowID ( uint32_t tRowID )
 
 		do
 		{
-			if ( tRowID<=m_dMinMax[(m_iCurBlock<<1)+1] )
+			if ( tRowID<=m_dMax[m_iCurBlock] )
 			{
 				m_bNeedToRewind = false;
 				return true;
@@ -149,7 +150,7 @@ uint32_t RowidIterator_T<true>::MarkMatchingBlocks()
 	m_dMatchingBlocks.Resize ( m_dBlockOffsets.size() );
 	Interval_T<uint32_t> tRowidBounds ( m_tBounds.m_uMin, m_tBounds.m_uMax );
 	for ( size_t i = 0; i < m_dBlockOffsets.size(); i++ )
-		if ( tRowidBounds.Overlaps ( { m_dMinMax[i<<1], m_dMinMax[(i<<1)+1] } ) )
+		if ( tRowidBounds.Overlaps ( { m_dMin[i], m_dMax[i] } ) )
 		{
 			m_dMatchingBlocks.BitSet(i);
 			uSet++;
@@ -180,7 +181,8 @@ bool RowidIterator_T<ROWID_RANGE>::StartBlock ( Span_T<uint32_t> & dRowIdBlock )
 
 	case Packing_e::ROW_BLOCKS_LIST:
 		m_pReader->Seek ( m_iMetaOffset + m_uRowStart );
-		DecodeDeltaVector ( m_dMinMax );
+		DecodeDeltaVector ( m_dMin );
+		DecodeDeltaVector ( m_dMax );
 		DecodeDeltaVector ( m_dBlockOffsets );
 		m_iDataOffset = m_pReader->GetPos();
 

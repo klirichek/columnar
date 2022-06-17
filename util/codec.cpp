@@ -121,6 +121,7 @@ bool IntCodec_c::Decode ( const util::Span_T<uint32_t> & dCompressed, util::Span
 
 	size_t uDecompressedSize = dDecompressed.size();
 	const uint32_t * pOut = tCodec.decodeArray ( dCompressed.data(), dCompressed.size(), dDecompressed.data(), uDecompressedSize );
+	assert ( uDecompressedSize<=dDecompressed.size() );
 	dDecompressed.resize(uDecompressedSize);
 
 	return pOut-(const uint32_t*)dCompressed.data()==dCompressed.size();
