@@ -240,7 +240,7 @@ void SecondaryIndex_c::GetValsRows ( std::vector<BlockIterator_i *> & dIterators
 	uint64_t uBlockBaseOff = m_iBlocksBase + m_dBlockStartOff[iCol];
 	uint64_t uBlocksCount = m_dBlocksCount[iCol];
 
-	std::unique_ptr<BlockReader_i> pBlockReader { CreateBlockReader ( m_tReader.GetFD(), tCol.m_eType, m_tSettings, uBlockBaseOff, pBounds ) } ;
+	std::unique_ptr<BlockReader_i> pBlockReader { CreateBlockReader ( m_tReader.GetFD(), tCol, m_tSettings, uBlockBaseOff, pBounds ) } ;
 	std::vector<BlockIter_t> dBlocksIt;
  	for ( const uint64_t uVal : tFilter.m_dValues )
 		dBlocksIt.emplace_back ( BlockIter_t ( m_dIdx[iCol]->Search ( uVal ), uVal, uBlocksCount, m_iValuesPerBlock ) );
@@ -289,7 +289,7 @@ void SecondaryIndex_c::GetRangeRows ( std::vector<BlockIterator_i *> & dIterator
 
 	BlockIter_t tPosIt ( tPos, 0, uBlocksCount, m_iValuesPerBlock );
 
-	std::unique_ptr<BlockReader_i> pReader { CreateRangeReader ( m_tReader.GetFD(), tCol.m_eType, m_tSettings, uBlockBaseOff, pBounds ) };
+	std::unique_ptr<BlockReader_i> pReader { CreateRangeReader ( m_tReader.GetFD(), tCol, m_tSettings, uBlockBaseOff, pBounds ) };
 	pReader->CreateBlocksIterator ( tPosIt, tFilter, dIterators );
 }
 

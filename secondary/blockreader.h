@@ -52,7 +52,7 @@ public:
 
 
 struct Settings_t;
-BlockReader_i * CreateBlockReader ( int iFD, common::AttrType_e eType, const Settings_t & tSettings, uint64_t uBlockBaseOff, const common::RowidRange_t * pBounds );
-BlockReader_i * CreateRangeReader ( int iFD, common::AttrType_e eType, const Settings_t & tSettings, uint64_t uBlockBaseOff, const common::RowidRange_t * pBounds );
+BlockReader_i * CreateBlockReader ( int iFD, const ColumnInfo_t & tCol, const Settings_t & tSettings, uint64_t uBlockBaseOff, const common::RowidRange_t * pBounds );
+BlockReader_i * CreateRangeReader ( int iFD, const ColumnInfo_t & tCol, const Settings_t & tSettings, uint64_t uBlockBaseOff, const common::RowidRange_t * pBounds );
 
 } // namespace SI

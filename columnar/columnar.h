@@ -30,7 +30,7 @@ namespace util
 namespace columnar
 {
 
-static const int LIB_VERSION = 15;
+static const int LIB_VERSION = 16;
 
 class Iterator_i
 {
@@ -46,6 +46,8 @@ public:
 	virtual	int			Get ( const uint8_t * & pData ) = 0;
 	virtual	uint8_t *	GetPacked() = 0;
 	virtual	int			GetLength() = 0;
+
+	virtual void		AddDesc ( std::vector<common::IteratorDesc_t> & dDesc ) const = 0;
 };
 
 

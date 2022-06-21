@@ -232,12 +232,15 @@ public:
 	bool			GetNextRowIdBlock ( Span_T<uint32_t> & dRowIdBlock ) final;
 	int64_t			GetNumProcessed() const final;
 	bool			Setup ( const std::vector<HeaderWithLocator_t> & dHeaders, SharedBlocks_c & pMatchingBlocks );
+	void			AddDesc ( std::vector<IteratorDesc_t> & dDesc ) const final;
 
 private:
 	static const int MAX_COLLECTED = 128;
 
 	std::shared_ptr<MatchingBlocks_c>	m_pMatchingBlocks;
 	std::array<uint32_t,MAX_COLLECTED>	m_dCollected;
+
+	std::vector<std::string>			m_dAttrs;
 
 	int64_t		m_iTotalDocs = 0;
 	int			m_iDoc = 0;
@@ -262,6 +265,9 @@ bool BlockIterator_c::Setup ( const std::vector<HeaderWithLocator_t> & dHeaders,
 {
 	assert ( !dHeaders.empty() );
 
+	for ( const auto & i : dHeaders )
+		m_dAttrs.push_back ( i.first->GetName() );
+
 	const AttributeHeader_i * pFirstAttr = dHeaders[0].first;
 	m_iTotalDocs = pFirstAttr->GetNumDocs();
 	m_iNumLevels = pFirstAttr->GetNumMinMaxLevels();
@@ -283,6 +289,11 @@ bool BlockIterator_c::Setup ( const std::vector<HeaderWithLocator_t> & dHeaders,
 	return true;
 }
 
+void BlockIterator_c::AddDesc ( std::vector<IteratorDesc_t> & dDesc ) const
+{
+	for ( const auto & i : m_dAttrs )
+		dDesc.push_back ( { i, "prefilter" } );
+}
 
 bool BlockIterator_c::HintRowID ( uint32_t tRowID )
 {
