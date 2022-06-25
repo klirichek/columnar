@@ -16,18 +16,15 @@
 
 cmake_minimum_required ( VERSION 3.17 )
 
-set(PGM_TEST 0)
 include ( GetPGM )
-
-SET ( CMAKE_CXX_STANDARD 17 )
 
 add_library ( secondary_index MODULE
     builder.cpp iterator.cpp blockreader.cpp secondary.cpp
     common.h builder.h iterator.h blockreader.h secondary.h )
 
-target_link_libraries ( secondary_index PUBLIC secondary_root pgmindexlib FastPFOR::FastPFOR util common )
-set_target_properties( secondary_index PROPERTIES PREFIX "" OUTPUT_NAME lib_manticore_secondary )
-
-# runaround - POSITION_INDEPENDENT_CODE must be transitive from secondary_root, but it doesn't work (a bug in cmake?)
-get_target_property ( pic secondary_root INTERFACE_POSITION_INDEPENDENT_CODE )
-set_property ( TARGET secondary_index PROPERTY POSITION_INDEPENDENT_CODE ${pic} )
+target_link_libraries ( secondary_index PRIVATE PGM::pgmindexlib FastPFOR::FastPFOR columnar_root util common )
+set_target_properties ( secondary_index PROPERTIES
+		POSITION_INDEPENDENT_CODE ON
+		INTERPROCEDURAL_OPTIMIZATION OFF
+		PREFIX ""
+		OUTPUT_NAME lib_manticore_secondary )

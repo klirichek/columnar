@@ -33,31 +33,11 @@ include ( CheckFunctionExists )
 check_function_exists ( pread HAVE_PREAD )
 set_source_files_properties ( reader.cpp PROPERTIES COMPILE_DEFINITIONS HAVE_PREAD=${HAVE_PREAD} )
 
-target_link_libraries ( util PRIVATE FastPFOR::FastPFOR columnar_root)
+target_link_libraries ( util PRIVATE FastPFOR::FastPFOR columnar_root )
+set_property ( TARGET util PROPERTY POSITION_INDEPENDENT_CODE ON )
 
-# runaround - POSITION_INDEPENDENT_CODE must be transitive from columnar_root, but it doesn't work (a bug in cmake?)
-get_target_property ( pic columnar_root INTERFACE_POSITION_INDEPENDENT_CODE )
-set_property ( TARGET util PROPERTY POSITION_INDEPENDENT_CODE ${pic} )
+message ( STATUS "Version ${VERSION_STR} ${GIT_COMMIT_ID}@${GIT_TIMESTAMP_ID}, ${GIT_BRANCH_ID}" )
+configure_file ( ${CMAKE_CURRENT_SOURCE_DIR}/version.h.in ${columnar_BINARY_DIR}/config/gen_version.h )
 
-set (VERSION_DIR "${columnar_BINARY_DIR}/config")
-target_include_directories ( util PRIVATE ${VERSION_DIR} )
-
-add_custom_target (
-		columnarver
-		COMMAND ${CMAKE_COMMAND}
-		-D VERSION_SRC=${CMAKE_CURRENT_SOURCE_DIR}/version.h.in
-		-D VERSION_TRG=${VERSION_DIR}/gen_version.h
-		-D CMAKE_MODULE_PATH=${CMAKE_MODULE_PATH}
-		-D VERSION_STR=${CMAKE_PROJECT_VERSION}
-		-D SOURCE_DIR=${columnar_SOURCE_DIR}
-		-P ${CMAKE_CURRENT_SOURCE_DIR}/version.cmake
-		VERBATIM
-		COMMENT "Assign build version data"
-		BYPRODUCTS ${VERSION_DIR}/gen_version.h
-		SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/version.h.in
-		DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/version.h.in
-)
-
-add_dependencies ( util columnarver )
-
+target_include_directories ( util PUBLIC ${columnar_BINARY_DIR}/config )
 target_include_directories ( util INTERFACE ${CMAKE_CURRENT_SOURCE_DIR} )
