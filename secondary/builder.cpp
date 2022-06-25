@@ -252,8 +252,7 @@ private:
 	std::vector<uint32_t>	m_dMin;
 	std::vector<uint32_t>	m_dMax;
 	std::vector<uint32_t>	m_dRows;
-	std::vector<uint32_t>	m_dMinPerBlock;
-	std::vector<uint32_t>	m_dMaxPerBlock;
+	std::vector<uint32_t>	m_dMinMax;
 	std::vector<uint32_t>	m_dBlockOffsets;
 
 	std::vector<uint32_t>	m_dBufTmp;
@@ -343,19 +342,18 @@ void RowWriter_T<VALUE, FLOAT_VALUE>::WriteBlockList ( int iItem, uint32_t uSrcR
 	m_dTypes[iItem] = (uint32_t)Packing_e::ROW_BLOCKS_LIST;
 
 	int iBlocks = (int)( ( uSrcRowsCount + ROWIDS_PER_BLOCK - 1 ) / ROWIDS_PER_BLOCK );
-	m_dMinPerBlock.resize(iBlocks);
-	m_dMaxPerBlock.resize(iBlocks);
+	m_dMinMax.resize(iBlocks*2);
 	for ( int iBlock=0; iBlock<iBlocks; iBlock++ )
 	{
 		uint32_t uSrcStart = uSrcRowsStart + iBlock*ROWIDS_PER_BLOCK;
 		uint32_t uSrcCount = iBlock<iBlocks-1 ? ROWIDS_PER_BLOCK : (uint32_t)( uSrcRowsCount - ( iBlock * ROWIDS_PER_BLOCK ) );
 
-		m_dMinPerBlock[iBlock] = m_dRows[uSrcStart];
-		m_dMaxPerBlock[iBlock] = m_dRows[uSrcStart + uSrcCount - 1];
+		m_dMinMax[iBlock*2]		= m_dRows[uSrcStart];
+		m_dMinMax[iBlock*2+1]	= m_dRows[uSrcStart + uSrcCount - 1];
 	}
 
-	EncodeBlock ( m_dMinPerBlock, m_pCodec.get(), m_dBufTmp, tBlockWriter );
-	EncodeBlock ( m_dMaxPerBlock, m_pCodec.get(), m_dBufTmp, tBlockWriter );
+	tBlockWriter.Pack_uint32(iBlocks);
+	EncodeBlock ( m_dMinMax, m_pCodec.get(), m_dBufTmp, tBlockWriter );
 
 	// encode blocks to temporary memory storage
 	m_dBlockOffsets.resize(iBlocks);
@@ -387,8 +385,7 @@ void RowWriter_T<VALUE, FLOAT_VALUE>::ResetData()
 	m_dRows.resize(0);
 	m_dRowsPacked.resize(0);
 	m_dTmp.resize(0);
-	m_dMinPerBlock.resize(0);
-	m_dMaxPerBlock.resize(0);
+	m_dMinMax.resize(0);
 	m_dBlockOffsets.resize(0);
 }
 

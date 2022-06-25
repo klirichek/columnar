@@ -117,12 +117,12 @@ protected:
 	RowidRange_t				m_tBounds;
 	bool						m_bHaveBounds = false;
 
-	SpanResizeable_T<uint32_t> m_dTypes;
-	SpanResizeable_T<uint32_t> m_dMin;
-	SpanResizeable_T<uint32_t> m_dMax;
-	SpanResizeable_T<uint32_t> m_dRowStart;
+	SpanResizeable_T<uint32_t>	m_dTypes;
+	SpanResizeable_T<uint32_t>	m_dMin;
+	SpanResizeable_T<uint32_t>	m_dMax;
+	SpanResizeable_T<uint32_t>	m_dRowStart;
 
-	SpanResizeable_T<uint32_t> m_dBufTmp;
+	SpanResizeable_T<uint32_t>	m_dBufTmp;
 };
 
 

@@ -55,8 +55,7 @@ private:
 
 	int					m_iCurBlock = 0;
 	SpanResizeable_T<uint32_t>	m_dRows;
-	SpanResizeable_T<uint32_t>	m_dMin;
-	SpanResizeable_T<uint32_t>	m_dMax;
+	SpanResizeable_T<uint32_t>	m_dMinMax;
 	SpanResizeable_T<uint32_t>	m_dBlockOffsets;
 	SpanResizeable_T<uint32_t>	m_dTmp;
 	BitVec_T<uint64_t>	m_dMatchingBlocks{0};
@@ -64,7 +63,7 @@ private:
 	bool		StartBlock ( Span_T<uint32_t> & dRowIdBlock );
 	bool		ReadNextBlock ( Span_T<uint32_t> & dRowIdBlock );
 
-	FORCE_INLINE void DecodeDeltaVector ( SpanResizeable_T<uint32_t> & dDecoded );
+	FORCE_INLINE void DecodeDeltaVector ( SpanResizeable_T<uint32_t> & dDecoded, int iRsetSize=0 );
 	uint32_t	MarkMatchingBlocks();
 	bool		RewindToNextMatchingBlock();
 };
@@ -108,7 +107,7 @@ bool RowidIterator_T<ROWID_RANGE>::HintRowID ( uint32_t tRowID )
 
 		do
 		{
-			if ( tRowID<=m_dMax[m_iCurBlock] )
+			if ( tRowID<=m_dMinMax[(m_iCurBlock<<1)+1] )
 			{
 				m_bNeedToRewind = false;
 				return true;
@@ -154,7 +153,7 @@ uint32_t RowidIterator_T<true>::MarkMatchingBlocks()
 	m_dMatchingBlocks.Resize ( m_dBlockOffsets.size() );
 	Interval_T<uint32_t> tRowidBounds ( m_tBounds.m_uMin, m_tBounds.m_uMax );
 	for ( size_t i = 0; i < m_dBlockOffsets.size(); i++ )
-		if ( tRowidBounds.Overlaps ( { m_dMin[i], m_dMax[i] } ) )
+		if ( tRowidBounds.Overlaps ( { m_dMinMax[i<<1], m_dMinMax[(i<<1)+1] } ) )
 		{
 			m_dMatchingBlocks.BitSet(i);
 			uSet++;
@@ -184,10 +183,11 @@ bool RowidIterator_T<ROWID_RANGE>::StartBlock ( Span_T<uint32_t> & dRowIdBlock )
 		break;
 
 	case Packing_e::ROW_BLOCKS_LIST:
+	{
 		m_pReader->Seek ( m_iMetaOffset + m_uRowStart );
-		DecodeDeltaVector ( m_dMin );
-		DecodeDeltaVector ( m_dMax );
-		DecodeDeltaVector ( m_dBlockOffsets );
+		int iBlocks = m_pReader->Unpack_uint32();
+		DecodeDeltaVector ( m_dMinMax, iBlocks*2 );
+		DecodeDeltaVector ( m_dBlockOffsets, iBlocks );
 		m_iDataOffset = m_pReader->GetPos();
 
 		if ( !MarkMatchingBlocks() )
@@ -198,6 +198,7 @@ bool RowidIterator_T<ROWID_RANGE>::StartBlock ( Span_T<uint32_t> & dRowIdBlock )
 
 		m_iCurBlock = 0;
 		return ReadNextBlock(dRowIdBlock);
+	}
 
 	default:
 		m_bStopped = true;
@@ -250,8 +251,9 @@ bool RowidIterator_T<ROWID_RANGE>::ReadNextBlock ( Span_T<uint32_t> & dRowIdBloc
 }
 
 template <bool ROWID_RANGE>
-void RowidIterator_T<ROWID_RANGE>::DecodeDeltaVector ( SpanResizeable_T<uint32_t> & dDecoded )
+void RowidIterator_T<ROWID_RANGE>::DecodeDeltaVector ( SpanResizeable_T<uint32_t> & dDecoded, int iRsetSize )
 {
+	dDecoded.resize(iRsetSize);
 	m_dTmp.resize(0);
 	ReadVectorLen32 ( m_dTmp, *m_pReader );
 	m_pCodec->Decode ( m_dTmp, dDecoded );
