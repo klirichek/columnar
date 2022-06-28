@@ -27,7 +27,5 @@ ADD_LIBRARY ( common OBJECT
 
 target_link_libraries ( common PRIVATE columnar_root )
 
-# runaround - POSITION_INDEPENDENT_CODE must be transitive from columnar_root, but it doesn't work (a bug in cmake?)
-get_target_property ( pic columnar_root INTERFACE_POSITION_INDEPENDENT_CODE )
-set_property ( TARGET common PROPERTY POSITION_INDEPENDENT_CODE ${pic} )
+set_property ( TARGET common PROPERTY POSITION_INDEPENDENT_CODE TRUE )
 target_include_directories ( common INTERFACE ${CMAKE_CURRENT_SOURCE_DIR} )

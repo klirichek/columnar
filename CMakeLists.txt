@@ -168,6 +168,7 @@ target_include_directories ( columnar_root INTERFACE columnar util common )
 set_property ( TARGET columnar_root PROPERTY INTERFACE_POSITION_INDEPENDENT_CODE TRUE )
 
 add_subdirectory ( util )
+add_subdirectory ( common )
 
 include ( GNUInstallDirs )
 if (WIN32)
